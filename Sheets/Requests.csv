@@ -1,0 +1,3 @@
+RequestId,EmployeeEmail,EmployeeName,LeaveType,StartDate,EndDate,HoursRequested,Reason,Status,SupervisorEmail,SupervisorDecision,SupervisorDecisionDate,AdminDecision,AdminDecisionDate,CalendarEventId,Warnings,CreatedAt,UpdatedAt
+9b341646-efd6-4844-a9fa-9d8ac6bc4866,fake1@gmbc.org,fake person1,Annual Leave,2026-07-08,2026-07-15,40,I want some time off,Approved,fake3@gmbc.org,Approved,7/7/2026,Approved,7/7/2026,ghi6f7fo8aag9tj3unehmq4j4g@google.com,,7/7/2026 10:56:51,7/7/2026 10:59:36
+f85f8841-f6ba-41a4-a8a6-a591eb3d0dc0,fake2@gmbc.org,fake person2,Annual Leave,2026-08-05,2026-08-10,32,Vacation time to see friends get married,Pending Supervisor Approval,fake3@gmbc.org,,,,,,,7/7/2026 11:15:44,7/7/2026 11:15:44

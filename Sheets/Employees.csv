@@ -1,0 +1,4 @@
+Email,Name,SupervisorEmail,AnniversaryDate,EmploymentType,WeeklyHours,IsAdmin,IsSupervisor,IsPastoralStaff,IsActive,CalendarId
+fake1@gmbc.org,fake person1,fake3@gmbc.org,8/25/2022 0:00:00,Full-Time,40,TRUE,TRUE,FALSE,TRUE,
+fake2@gmbc.org,fake person2,fake1@gmbc.org,5/4/2020,Full-Time,40,FALSE,FALSE,FALSE,TRUE,
+fake3@gmbc.org,fake person3,fake3@gmbc.org,9/1/2007,Full-Time,40,TRUE,TRUE,FALSE,TRUE,
