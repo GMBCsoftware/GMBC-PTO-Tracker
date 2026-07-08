@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f7f3ea;
+      color: #333F48;
+      margin: 0;
+      padding: 24px;
+    }
+
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid #e8ddc8;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+
+    textarea {
+      min-height: 80px;
+    }
+
+    button {
+      background: #333F48;
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      cursor: pointer;
+      margin-top: 8px;
+      margin-right: 6px;
+    }
+
+    button.secondary {
+      background: #85431E;
+    }
+
+    button.danger {
+      background: #9b1c1c;
+    }
+
+    button.light {
+      background: #e8ddc8;
+      color: #333F48;
+    }
+
+    button.tab {
+      background: #e8ddc8;
+      color: #333F48;
+      margin-bottom: 10px;
+    }
+
+    button.tab.active {
+      background: #333F48;
+      color: #fff;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .muted {
+      color: #666;
+      font-size: 13px;
+    }
+
+    .warning {
+      color: #9b1c1c;
+      font-weight: bold;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: #eee;
+      font-size: 12px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .edit-card {
+      border: 2px solid #333F48;
+    }
+
+    .actions {
+      min-width: 210px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>Paid Time Off</h1>
+  <div id="app" class="card">Loading...</div>
+</div>
+
+<script>
+let DATA = null;
+let ADMIN_FILTER = 'pending';
+
+function load() {
+  const app = document.getElementById('app');
+  app.innerHTML = '<p>Loading PTO data...</p>';
+
+  google.script.run
+    .withSuccessHandler(function(data) {
+      try {
+        render(data);
+      } catch (err) {
+        showError(err);
+      }
+    })
+    .withFailureHandler(function(err) {
+      showError(err);
+    })
+    .getBootstrapData();
+}
+
+function showError(err) {
+  const msg = err && err.message ? err.message : String(err);
+  document.getElementById('app').innerHTML = `
+    <h2>Something went wrong</h2>
+    <p class="warning">${escapeHtml(msg)}</p>
+    <p class="muted">Check that the Employees, Requests, Settings, and Audit tabs exist and that their headers match exactly.</p>
+  `;
+}
+
+function render(data) {
+  DATA = data;
+  const app = document.getElementById('app');
+
+  if (!data.ok) {
+    app.innerHTML = `<p class="warning">${escapeHtml(data.message)}</p>`;
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="card">
+      <h2>Hello, ${escapeHtml(data.employee.Name)}</h2>
+      <p class="muted">${escapeHtml(data.employee.Email)}</p>
+    </div>
+
+    ${renderBalances(data.balances)}
+    ${renderRequestForm()}
+    ${renderRequests('My Requests', data.myRequests, false, false)}
+    ${data.isSupervisor ? renderRequests('Supervisor Approval Dashboard', data.supervisorRequests, false, true) : ''}
+    ${data.isAdmin ? renderAdminDashboard(data.allRequests) : ''}
+  `;
+}
+
+function renderBalances(b) {
+  return `
+    <div class="card">
+      <h2>My Time Off Balance</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Annual Leave</h3>
+          <p><strong>Allowance:</strong> ${b.annual.allowanceHours} hrs</p>
+          <p><strong>Used:</strong> ${b.annual.usedHours} hrs</p>
+          <p><strong>Available:</strong> ${b.annual.availableHours} hrs</p>
+        </div>
+        <div class="card">
+          <h3>Personal Leave</h3>
+          <p><strong>Allowance:</strong> ${b.personal.allowanceHours} hrs</p>
+          <p><strong>Used:</strong> ${b.personal.usedHours} hrs</p>
+          <p><strong>Available:</strong> ${b.personal.availableHours} hrs</p>
+        </div>
+        <div class="card">
+          <h3>Serious Illness</h3>
+          <p><strong>Allowance:</strong> No cap</p>
+          <p><strong>Used:</strong> ${b.serious.usedHours} hrs</p>
+          <p><strong>Available:</strong> No cap</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderRequestForm() {
+  return `
+    <div class="card">
+      <h2>Request Time Off</h2>
+
+      <label>Leave Type</label>
+      <select id="leaveType">
+        <option>Annual Leave</option>
+        <option>Personal Leave</option>
+        <option>Serious Illness Leave</option>
+        <option>Bereavement Leave</option>
+        <option>Unpaid Leave</option>
+        <option>Other</option>
+      </select>
+
+      <div class="grid">
+        <div>
+          <label>Start Date</label>
+          <input id="startDate" type="date">
+        </div>
+        <div>
+          <label>End Date</label>
+          <input id="endDate" type="date">
+        </div>
+        <div>
+          <label>Hours Requested</label>
+          <input id="hoursRequested" type="number" step="0.25" min="0">
+        </div>
+      </div>
+
+      <label>Reason / Notes</label>
+      <textarea id="reason"></textarea>
+
+      <button onclick="submitRequest()">Submit Request</button>
+      <p id="submitResult" class="muted"></p>
+    </div>
+  `;
+}
+
+function renderAdminDashboard(requests) {
+  const filtered = filterAdminRequests(requests || []);
+
+  return `
+    <div class="card">
+      <h2>Admin Dashboard</h2>
+
+      <button class="tab ${ADMIN_FILTER === 'pending' ? 'active' : ''}" onclick="setAdminFilter('pending')">Pending / Unapproved</button>
+      <button class="tab ${ADMIN_FILTER === 'approved' ? 'active' : ''}" onclick="setAdminFilter('approved')">Approved</button>
+      <button class="tab ${ADMIN_FILTER === 'denied' ? 'active' : ''}" onclick="setAdminFilter('denied')">Denied</button>
+      <button class="tab ${ADMIN_FILTER === 'all' ? 'active' : ''}" onclick="setAdminFilter('all')">All</button>
+
+      ${renderRequestsTable(filtered, true, false)}
+    </div>
+  `;
+}
+
+function setAdminFilter(filter) {
+  ADMIN_FILTER = filter;
+  render(DATA);
+}
+
+function filterAdminRequests(requests) {
+  if (ADMIN_FILTER === 'approved') {
+    return requests.filter(r => r.Status === 'Approved');
+  }
+
+  if (ADMIN_FILTER === 'denied') {
+    return requests.filter(r =>
+      r.Status === 'Denied by Supervisor' ||
+      r.Status === 'Denied by Admin'
+    );
+  }
+
+  if (ADMIN_FILTER === 'all') {
+    return requests;
+  }
+
+  return requests.filter(r =>
+    r.Status === 'Pending Supervisor Approval' ||
+    r.Status === 'Pending Admin Final Approval'
+  );
+}
+
+function renderRequests(title, requests, adminMode, supervisorMode) {
+  return `
+    <div class="card">
+      <h2>${escapeHtml(title)}</h2>
+      ${renderRequestsTable(requests, adminMode, supervisorMode)}
+    </div>
+  `;
+}
+
+function renderRequestsTable(requests, adminMode, supervisorMode) {
+  if (!requests || !requests.length) {
+    return `<p class="muted">No requests found.</p>`;
+  }
+
+  const rows = requests.map(r => `
+    <tr>
+      <td>
+        <strong>${escapeHtml(r.EmployeeName || '')}</strong><br>
+        <span class="muted">${escapeHtml(r.EmployeeEmail || '')}</span>
+      </td>
+      <td>${escapeHtml(r.LeaveType || '')}</td>
+      <td>${escapeHtml(formatDate(r.StartDate))} to ${escapeHtml(formatDate(r.EndDate))}</td>
+      <td>${escapeHtml(r.HoursRequested || '')}</td>
+      <td><span class="pill">${escapeHtml(r.Status || '')}</span></td>
+      <td>${r.Warnings ? `<span class="warning">${escapeHtml(r.Warnings)}</span>` : ''}</td>
+      <td class="actions">${renderActions(r, adminMode, supervisorMode)}</td>
+    </tr>
+    <tr id="edit-row-${escapeAttr(r.RequestId)}" class="hidden">
+      <td colspan="7">
+        ${renderEditCard(r, adminMode, supervisorMode)}
+      </td>
+    </tr>
+  `).join('');
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Type</th>
+          <th>Dates</th>
+          <th>Hours</th>
+          <th>Status</th>
+          <th>Warnings</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function renderActions(r, adminMode, supervisorMode) {
+  if (adminMode) {
+    return renderAdminButtons(r);
+  }
+
+  if (supervisorMode) {
+    return renderSupervisorButtons(r);
+  }
+
+  return renderStatusHint(r);
+}
+
+function renderStatusHint(r) {
+  if (r.Status === 'Pending Supervisor Approval') {
+    return '<span class="muted">Waiting on supervisor</span>';
+  }
+
+  if (r.Status === 'Pending Admin Final Approval') {
+    return '<span class="muted">Waiting on final admin approval</span>';
+  }
+
+  return '';
+}
+
+function renderSupervisorButtons(r) {
+  if (r.Status !== 'Pending Supervisor Approval') {
+    return '';
+  }
+
+  return `
+    <button class="secondary" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Edit</button>
+
+    <label style="font-weight:normal; display:block; margin-top:8px;">
+      <input type="checkbox" id="sup-override-${escapeAttr(r.RequestId)}" style="width:auto;">
+      Override balance if needed
+    </label>
+
+    <button onclick="supervisorDecision('${escapeAttr(r.RequestId)}','approve')">Approve</button>
+    <button class="danger" onclick="supervisorDecision('${escapeAttr(r.RequestId)}','deny')">Deny</button>
+  `;
+}
+
+function renderAdminButtons(r) {
+  if (r.Status !== 'Pending Admin Final Approval' && r.Status !== 'Pending Supervisor Approval') {
+    return '';
+  }
+
+  return `
+    <button class="secondary" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Edit</button>
+
+    <label style="font-weight:normal; display:block; margin-top:8px;">
+      <input type="checkbox" id="override-${escapeAttr(r.RequestId)}" style="width:auto;">
+      Override balance if needed
+    </label>
+
+    <button onclick="adminDecision('${escapeAttr(r.RequestId)}','approve')">Final Approve</button>
+    <button class="danger" onclick="adminDecision('${escapeAttr(r.RequestId)}','deny')">Deny</button>
+  `;
+}
+
+function renderEditCard(r, adminMode, supervisorMode) {
+  return `
+    <div class="card edit-card">
+      <h3>Edit Request Before Approval</h3>
+      <p class="muted">
+        Changes made here update the pending request before approval. Approved requests should be changed through a separate correction process.
+      </p>
+
+      <div class="grid">
+        <div>
+          <label>Start Date</label>
+          <input id="edit-start-${escapeAttr(r.RequestId)}" type="date" value="${escapeAttr(formatDate(r.StartDate))}">
+        </div>
+
+        <div>
+          <label>End Date</label>
+          <input id="edit-end-${escapeAttr(r.RequestId)}" type="date" value="${escapeAttr(formatDate(r.EndDate))}">
+        </div>
+
+        <div>
+          <label>Hours Requested</label>
+          <input id="edit-hours-${escapeAttr(r.RequestId)}" type="number" step="0.25" min="0" value="${escapeAttr(r.HoursRequested || '')}">
+        </div>
+      </div>
+
+      <label>Reason / Notes</label>
+      <textarea id="edit-reason-${escapeAttr(r.RequestId)}">${escapeHtml(r.Reason || '')}</textarea>
+
+      <button onclick="saveRequestEdit('${escapeAttr(r.RequestId)}')">Save Changes</button>
+      <button class="light" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Cancel</button>
+      <p id="edit-result-${escapeAttr(r.RequestId)}" class="muted"></p>
+    </div>
+  `;
+}
+
+function toggleEditCard(requestId) {
+  const row = document.getElementById('edit-row-' + requestId);
+
+  if (!row) {
+    return;
+  }
+
+  row.classList.toggle('hidden');
+}
+
+function saveRequestEdit(requestId) {
+  const startDate = document.getElementById('edit-start-' + requestId).value;
+  const endDate = document.getElementById('edit-end-' + requestId).value;
+  const hoursRequested = document.getElementById('edit-hours-' + requestId).value;
+  const reason = document.getElementById('edit-reason-' + requestId).value;
+
+  const result = document.getElementById('edit-result-' + requestId);
+  result.innerText = 'Saving...';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      result.innerText = res.message;
+      load();
+    })
+    .withFailureHandler(function(err) {
+      result.innerText = err.message || String(err);
+    })
+    .updateRequestDetails(requestId, {
+      startDate: startDate,
+      endDate: endDate,
+      hoursRequested: hoursRequested,
+      reason: reason
+    });
+}
+
+function updateRequestDetails(requestId, payload) {
+  const user = getCurrentUser_();
+  const request = getRequestById_(requestId);
+
+  if (!request) {
+    throw new Error('Request not found.');
+  }
+
+  const isAssignedSupervisor =
+    lower_(request.SupervisorEmail) === lower_(user.email);
+
+  const isAdminUser = isAdmin_(user.email);
+
+  if (!isAssignedSupervisor && !isAdminUser) {
+    throw new Error('Only the assigned supervisor or an admin can edit this request.');
+  }
+
+  if (
+    request.Status !== STATUS.PENDING_SUPERVISOR &&
+    request.Status !== STATUS.PENDING_ADMIN
+  ) {
+    throw new Error('Only pending requests can be edited.');
+  }
+
+  const employee = getEmployeeByEmail_(request.EmployeeEmail);
+
+  if (!employee) {
+    throw new Error('Employee not found.');
+  }
+
+  const startDate = String(payload.startDate || '').trim();
+  const endDate = String(payload.endDate || '').trim();
+  const hoursRequested = Number(payload.hoursRequested || 0);
+  const reason = String(payload.reason || '').trim();
+
+  if (!startDate || !endDate) {
+    throw new Error('Start date and end date are required.');
+  }
+
+  if (!hoursRequested || hoursRequested <= 0) {
+    throw new Error('Hours requested must be greater than 0.');
+  }
+
+  if (new Date(endDate) < new Date(startDate)) {
+    throw new Error('End date cannot be before start date.');
+  }
+
+  const employeeRequests = getRequests_().filter(function (r) {
+    return lower_(r.EmployeeEmail) === lower_(request.EmployeeEmail) &&
+      String(r.RequestId) !== String(requestId);
+  });
+
+  const warnings = validateRequest_(
+    employee,
+    request.LeaveType,
+    startDate,
+    endDate,
+    hoursRequested,
+    employeeRequests,
+    true
+  );
+
+  const updates = {
+    StartDate: startDate,
+    EndDate: endDate,
+    HoursRequested: hoursRequested,
+    Reason: reason,
+    Warnings: warnings.join(' | '),
+    UpdatedAt: now_()
+  };
+
+  updateRequest_(requestId, updates);
+
+  audit_(
+    user.email,
+    'Edited PTO request details',
+    requestId,
+    JSON.stringify(updates)
+  );
+
+  return makeClientSafe_({
+    ok: true,
+    message: warnings.length
+      ? 'Request updated with warning(s): ' + warnings.join(' ')
+      : 'Request updated.'
+  });
+}
+
+function submitRequest() {
+  const payload = {
+    leaveType: document.getElementById('leaveType').value,
+    startDate: document.getElementById('startDate').value,
+    endDate: document.getElementById('endDate').value,
+    hoursRequested: document.getElementById('hoursRequested').value,
+    reason: document.getElementById('reason').value
+  };
+
+  document.getElementById('submitResult').innerText = 'Submitting...';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('submitResult').innerText = res.message;
+      load();
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('submitResult').innerText = err.message || String(err);
+    })
+    .submitRequest(payload);
+}
+
+function supervisorDecision(requestId, decision) {
+  const overrideBox = document.getElementById('sup-override-' + requestId);
+  const overrideBalance = overrideBox ? overrideBox.checked : false;
+
+  const note = prompt('Optional note for this decision:', '') || '';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      alert(res.message);
+      load();
+    })
+    .withFailureHandler(showError)
+    .supervisorDecision(requestId, decision, note, overrideBalance);
+}
+
+function adminDecision(requestId, decision) {
+  const overrideBox = document.getElementById('override-' + requestId);
+  const overrideBalance = overrideBox ? overrideBox.checked : false;
+
+  const note = prompt('Optional note for this decision:', '') || '';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      alert(res.message);
+      load();
+    })
+    .withFailureHandler(showError)
+    .adminDecision(requestId, decision, note, overrideBalance);
+}
+
+function formatDate(v) {
+  if (!v) return '';
+
+  if (typeof v === 'string') {
+    return v.substring(0, 10);
+  }
+
+  return String(v).substring(0, 10);
+}
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function escapeAttr(s) {
+  return escapeHtml(s).replaceAll(' ', '');
+}
+
+load();
+</script>
+</body>
+</html>
