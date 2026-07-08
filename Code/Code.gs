@@ -47,7 +47,22 @@ function include(filename) {
  *******************************/
 
 function getBootstrapData() {
-  const user = getCurrentUser_();
+  let user;
+
+  try {
+    user = getCurrentUser_();
+  } catch (err) {
+    return makeClientSafe_({
+      ok: false,
+      message: err && err.message
+        ? err.message
+        : 'Could not determine your Google account.',
+      user: {
+        email: ''
+      }
+    });
+  }
+
   const employee = getEmployeeByEmail_(user.email);
 
   if (!employee) {
@@ -879,7 +894,7 @@ function getCurrentUser_() {
 
   if (!email) {
     throw new Error(
-      'Could not determine your Google Workspace email. Check web app deployment settings.'
+      'Could not determine your Google Workspace email. Try opening the app from the correct Workspace account, then confirm the web app is deployed to run as the script owner and shared to your domain.'
     );
   }
 
