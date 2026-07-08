@@ -131,6 +131,18 @@
     .actions {
       min-width: 210px;
     }
+
+    .account-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .account-tools p {
+      margin: 0;
+    }
   </style>
 </head>
 
@@ -167,6 +179,13 @@ function showError(err) {
   document.getElementById('app').innerHTML = `
     <h2>Something went wrong</h2>
     <p class="warning">${escapeHtml(msg)}</p>
+    <div class="account-tools">
+      <p class="muted">If the wrong Google account opened the app, switch accounts and try again.</p>
+      <div>
+        <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
+        <button onclick="reloadApp()">Reload</button>
+      </div>
+    </div>
     <p class="muted">Check that the Employees, Requests, Settings, and Audit tabs exist and that their headers match exactly.</p>
   `;
 }
@@ -176,14 +195,32 @@ function render(data) {
   const app = document.getElementById('app');
 
   if (!data.ok) {
-    app.innerHTML = `<p class="warning">${escapeHtml(data.message)}</p>`;
+    const email = data.user && data.user.email
+      ? `<p class="muted">Google account detected: ${escapeHtml(data.user.email)}</p>`
+      : '<p class="muted">No Google Workspace email was detected for this session.</p>';
+
+    app.innerHTML = `
+      <h2>Sign-in issue</h2>
+      <p class="warning">${escapeHtml(data.message)}</p>
+      ${email}
+      <div class="account-tools">
+        <p class="muted">If this is the wrong account, switch accounts and reload the PTO app.</p>
+        <div>
+          <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
+          <button onclick="reloadApp()">Reload</button>
+        </div>
+      </div>
+    `;
     return;
   }
 
   app.innerHTML = `
     <div class="card">
       <h2>Hello, ${escapeHtml(data.employee.Name)}</h2>
-      <p class="muted">${escapeHtml(data.employee.Email)}</p>
+      <div class="account-tools">
+        <p class="muted">Signed in as ${escapeHtml(data.employee.Email)}</p>
+        <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
+      </div>
     </div>
 
     ${renderBalances(data.balances)}
@@ -635,6 +672,19 @@ function formatDate(v) {
   }
 
   return String(v).substring(0, 10);
+}
+
+function getAccountChooserUrl() {
+  const target = window.location.href;
+  return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(target);
+}
+
+function switchGoogleAccount() {
+  window.top.location.href = getAccountChooserUrl();
+}
+
+function reloadApp() {
+  window.top.location.reload();
 }
 
 function escapeHtml(s) {
