@@ -52,6 +52,15 @@ function getBootstrapData() {
   try {
     user = getCurrentUser_();
   } catch (err) {
+    audit_(
+      'system',
+      'Bootstrap failed',
+      '',
+      err && err.message
+        ? err.message
+        : 'Could not determine the current Google account.'
+    );
+
     return makeClientSafe_({
       ok: false,
       message: err && err.message
@@ -66,6 +75,13 @@ function getBootstrapData() {
   const employee = getEmployeeByEmail_(user.email);
 
   if (!employee) {
+    audit_(
+      user.email || 'unknown',
+      'Bootstrap rejected',
+      '',
+      'Email not listed in Employees sheet.'
+    );
+
     return makeClientSafe_({
       ok: false,
       message: 'Your Google account was recognized, but your email is not listed in the PTO Employees sheet.',
@@ -74,6 +90,13 @@ function getBootstrapData() {
   }
 
   if (!truthy_(employee.IsActive)) {
+    audit_(
+      user.email || 'unknown',
+      'Bootstrap rejected',
+      '',
+      'Employee account is inactive.'
+    );
+
     return makeClientSafe_({
       ok: false,
       message: 'Your PTO account is currently inactive.',
