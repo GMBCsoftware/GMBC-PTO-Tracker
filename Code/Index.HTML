@@ -211,9 +211,9 @@ function showError(err) {
     '<h2>Something went wrong</h2>' +
     '<p class="warning">' + escapeHtml(msg) + '</p>' +
     '<div class="account-tools">' +
-      '<p class="muted">If the wrong Google account opened the app, switch accounts and try again.</p>' +
+      '<p class="muted">If the wrong Google account opened the app, try the Google account chooser and then reload.</p>' +
       '<div>' +
-        '<button class="light" onclick="switchGoogleAccount()">Sign Out and Switch Account</button>' +
+        '<button class="light" onclick="switchGoogleAccount()">Choose Google Account</button>' +
         '<button onclick="reloadApp()">Reload</button>' +
       '</div>' +
     '</div>' +
@@ -237,9 +237,9 @@ function render(data) {
       '<p class="warning">' + escapeHtml(data.message) + '</p>' +
       emailLine +
       '<div class="account-tools">' +
-        '<p class="muted">If this is the wrong account, switch accounts and reload the PTO app.</p>' +
+        '<p class="muted">If this is the wrong account, open the Google account chooser and then reload the PTO app.</p>' +
         '<div>' +
-          '<button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>' +
+          '<button class="light" onclick="switchGoogleAccount()">Choose Google Account</button>' +
           '<button onclick="reloadApp()">Reload</button>' +
         '</div>' +
       '</div>';
@@ -251,7 +251,7 @@ function render(data) {
       '<h2>Hello, ' + escapeHtml(data.employee.Name) + '</h2>' +
       '<div class="account-tools">' +
         '<p class="muted">Signed in as ' + escapeHtml(data.employee.Email) + '</p>' +
-        '<button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>' +
+        '<button class="light" onclick="switchGoogleAccount()">Choose Google Account</button>' +
       '</div>' +
     '</div>' +
     renderBalances(data.balances) +
@@ -611,10 +611,17 @@ function formatDate(value) {
   return String(value).substring(0, 10);
 }
 
+function getReturnUrl() {
+  if (DATA && DATA.webAppUrl) {
+    return DATA.webAppUrl;
+  }
+
+  return window.location.href.replace(/\?.*$/, '');
+}
+
 function getAccountChooserUrl() {
-  var target = window.location.href;
-  var appEngineLogout = 'https://appengine.google.com/_ah/logout?continue=' + encodeURIComponent(target);
-  return 'https://accounts.google.com/Logout?continue=' + encodeURIComponent(appEngineLogout);
+  var target = getReturnUrl();
+  return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(target);
 }
 
 function switchGoogleAccount() {
