@@ -154,22 +154,19 @@
 
 <script>
 var APP_BOOT_ELEMENT = document.getElementById('app');
-
 if (APP_BOOT_ELEMENT) {
   APP_BOOT_ELEMENT.innerHTML = '<p>Booting PTO app...</p>';
 }
 
-let DATA = null;
-let ADMIN_FILTER = 'pending';
-let BOOTSTRAP_TIMEOUT = null;
-const BOOTSTRAP_TIMEOUT_MS = 15000;
+var DATA = null;
+var ADMIN_FILTER = 'pending';
+var BOOTSTRAP_TIMEOUT = null;
+var BOOTSTRAP_TIMEOUT_MS = 15000;
 
 function startBootstrapTimeout() {
   clearBootstrapTimeout();
   BOOTSTRAP_TIMEOUT = window.setTimeout(function() {
-    showError(
-      'The PTO app did not receive a response from Google Apps Script. If you just changed the project, confirm the latest code was saved and redeployed, then reload this page.'
-    );
+    showError('The PTO app did not receive a response from Google Apps Script. If you just changed the project, confirm the latest code was saved and redeployed, then reload this page.');
   }, BOOTSTRAP_TIMEOUT_MS);
 }
 
@@ -181,17 +178,11 @@ function clearBootstrapTimeout() {
 }
 
 function load() {
-  const app = document.getElementById('app');
+  var app = document.getElementById('app');
   app.innerHTML = '<p>Loading PTO data...</p>';
 
-  if (
-    typeof google === 'undefined' ||
-    !google.script ||
-    !google.script.run
-  ) {
-    showError(
-      'Google Apps Script client services are unavailable on this page. Open the deployed web app URL directly from Apps Script and try again.'
-    );
+  if (typeof google === 'undefined' || !google.script || !google.script.run) {
+    showError('Google Apps Script client services are unavailable on this page. Open the deployed web app URL directly from Apps Script and try again.');
     return;
   }
 
@@ -214,145 +205,141 @@ function load() {
 }
 
 function showError(err) {
+  var msg = err && err.message ? err.message : String(err);
   clearBootstrapTimeout();
-  const msg = err && err.message ? err.message : String(err);
-  document.getElementById('app').innerHTML = `
-    <h2>Something went wrong</h2>
-    <p class="warning">${escapeHtml(msg)}</p>
-    <div class="account-tools">
-      <p class="muted">If the wrong Google account opened the app, switch accounts and try again.</p>
-      <div>
-        <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
-        <button onclick="reloadApp()">Reload</button>
-      </div>
-    </div>
-    <p class="muted">Check that the Employees, Requests, Settings, and Audit tabs exist and that their headers match exactly.</p>
-  `;
+  document.getElementById('app').innerHTML =
+    '<h2>Something went wrong</h2>' +
+    '<p class="warning">' + escapeHtml(msg) + '</p>' +
+    '<div class="account-tools">' +
+      '<p class="muted">If the wrong Google account opened the app, switch accounts and try again.</p>' +
+      '<div>' +
+        '<button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>' +
+        '<button onclick="reloadApp()">Reload</button>' +
+      '</div>' +
+    '</div>' +
+    '<p class="muted">Check that the Employees, Requests, Settings, and Audit tabs exist and that their headers match exactly.</p>';
 }
 
 function render(data) {
+  var app = document.getElementById('app');
+  var emailLine = '';
   DATA = data;
-  const app = document.getElementById('app');
 
   if (!data.ok) {
-    const email = data.user && data.user.email
-      ? `<p class="muted">Google account detected: ${escapeHtml(data.user.email)}</p>`
-      : '<p class="muted">No Google Workspace email was detected for this session.</p>';
+    if (data.user && data.user.email) {
+      emailLine = '<p class="muted">Google account detected: ' + escapeHtml(data.user.email) + '</p>';
+    } else {
+      emailLine = '<p class="muted">No Google Workspace email was detected for this session.</p>';
+    }
 
-    app.innerHTML = `
-      <h2>Sign-in issue</h2>
-      <p class="warning">${escapeHtml(data.message)}</p>
-      ${email}
-      <div class="account-tools">
-        <p class="muted">If this is the wrong account, switch accounts and reload the PTO app.</p>
-        <div>
-          <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
-          <button onclick="reloadApp()">Reload</button>
-        </div>
-      </div>
-    `;
+    app.innerHTML =
+      '<h2>Sign-in issue</h2>' +
+      '<p class="warning">' + escapeHtml(data.message) + '</p>' +
+      emailLine +
+      '<div class="account-tools">' +
+        '<p class="muted">If this is the wrong account, switch accounts and reload the PTO app.</p>' +
+        '<div>' +
+          '<button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>' +
+          '<button onclick="reloadApp()">Reload</button>' +
+        '</div>' +
+      '</div>';
     return;
   }
 
-  app.innerHTML = `
-    <div class="card">
-      <h2>Hello, ${escapeHtml(data.employee.Name)}</h2>
-      <div class="account-tools">
-        <p class="muted">Signed in as ${escapeHtml(data.employee.Email)}</p>
-        <button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>
-      </div>
-    </div>
-
-    ${renderBalances(data.balances)}
-    ${renderRequestForm()}
-    ${renderRequests('My Requests', data.myRequests, false, false)}
-    ${data.isSupervisor ? renderRequests('Supervisor Approval Dashboard', data.supervisorRequests, false, true) : ''}
-    ${data.isAdmin ? renderAdminDashboard(data.allRequests) : ''}
-  `;
+  app.innerHTML =
+    '<div class="card">' +
+      '<h2>Hello, ' + escapeHtml(data.employee.Name) + '</h2>' +
+      '<div class="account-tools">' +
+        '<p class="muted">Signed in as ' + escapeHtml(data.employee.Email) + '</p>' +
+        '<button class="light" onclick="switchGoogleAccount()">Use Different Google Account</button>' +
+      '</div>' +
+    '</div>' +
+    renderBalances(data.balances) +
+    renderRequestForm() +
+    renderRequests('My Requests', data.myRequests, false, false) +
+    (data.isSupervisor ? renderRequests('Supervisor Approval Dashboard', data.supervisorRequests, false, true) : '') +
+    (data.isAdmin ? renderAdminDashboard(data.allRequests) : '');
 }
 
 function renderBalances(b) {
-  return `
-    <div class="card">
-      <h2>My Time Off Balance</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>Annual Leave</h3>
-          <p><strong>Allowance:</strong> ${b.annual.allowanceHours} hrs</p>
-          <p><strong>Used:</strong> ${b.annual.usedHours} hrs</p>
-          <p><strong>Available:</strong> ${b.annual.availableHours} hrs</p>
-        </div>
-        <div class="card">
-          <h3>Personal Leave</h3>
-          <p><strong>Allowance:</strong> ${b.personal.allowanceHours} hrs</p>
-          <p><strong>Used:</strong> ${b.personal.usedHours} hrs</p>
-          <p><strong>Available:</strong> ${b.personal.availableHours} hrs</p>
-        </div>
-        <div class="card">
-          <h3>Serious Illness</h3>
-          <p><strong>Allowance:</strong> No cap</p>
-          <p><strong>Used:</strong> ${b.serious.usedHours} hrs</p>
-          <p><strong>Available:</strong> No cap</p>
-        </div>
-      </div>
-    </div>
-  `;
+  return (
+    '<div class="card">' +
+      '<h2>My Time Off Balance</h2>' +
+      '<div class="grid">' +
+        '<div class="card">' +
+          '<h3>Annual Leave</h3>' +
+          '<p><strong>Allowance:</strong> ' + escapeHtml(b.annual.allowanceHours) + ' hrs</p>' +
+          '<p><strong>Used:</strong> ' + escapeHtml(b.annual.usedHours) + ' hrs</p>' +
+          '<p><strong>Available:</strong> ' + escapeHtml(b.annual.availableHours) + ' hrs</p>' +
+        '</div>' +
+        '<div class="card">' +
+          '<h3>Personal Leave</h3>' +
+          '<p><strong>Allowance:</strong> ' + escapeHtml(b.personal.allowanceHours) + ' hrs</p>' +
+          '<p><strong>Used:</strong> ' + escapeHtml(b.personal.usedHours) + ' hrs</p>' +
+          '<p><strong>Available:</strong> ' + escapeHtml(b.personal.availableHours) + ' hrs</p>' +
+        '</div>' +
+        '<div class="card">' +
+          '<h3>Serious Illness</h3>' +
+          '<p><strong>Allowance:</strong> No cap</p>' +
+          '<p><strong>Used:</strong> ' + escapeHtml(b.serious.usedHours) + ' hrs</p>' +
+          '<p><strong>Available:</strong> No cap</p>' +
+        '</div>' +
+      '</div>' +
+    '</div>'
+  );
 }
 
 function renderRequestForm() {
-  return `
-    <div class="card">
-      <h2>Request Time Off</h2>
-
-      <label>Leave Type</label>
-      <select id="leaveType">
-        <option>Annual Leave</option>
-        <option>Personal Leave</option>
-        <option>Serious Illness Leave</option>
-        <option>Bereavement Leave</option>
-        <option>Unpaid Leave</option>
-        <option>Other</option>
-      </select>
-
-      <div class="grid">
-        <div>
-          <label>Start Date</label>
-          <input id="startDate" type="date">
-        </div>
-        <div>
-          <label>End Date</label>
-          <input id="endDate" type="date">
-        </div>
-        <div>
-          <label>Hours Requested</label>
-          <input id="hoursRequested" type="number" step="0.25" min="0">
-        </div>
-      </div>
-
-      <label>Reason / Notes</label>
-      <textarea id="reason"></textarea>
-
-      <button onclick="submitRequest()">Submit Request</button>
-      <p id="submitResult" class="muted"></p>
-    </div>
-  `;
+  return (
+    '<div class="card">' +
+      '<h2>Request Time Off</h2>' +
+      '<label>Leave Type</label>' +
+      '<select id="leaveType">' +
+        '<option>Annual Leave</option>' +
+        '<option>Personal Leave</option>' +
+        '<option>Serious Illness Leave</option>' +
+        '<option>Bereavement Leave</option>' +
+        '<option>Unpaid Leave</option>' +
+        '<option>Other</option>' +
+      '</select>' +
+      '<div class="grid">' +
+        '<div>' +
+          '<label>Start Date</label>' +
+          '<input id="startDate" type="date">' +
+        '</div>' +
+        '<div>' +
+          '<label>End Date</label>' +
+          '<input id="endDate" type="date">' +
+        '</div>' +
+        '<div>' +
+          '<label>Hours Requested</label>' +
+          '<input id="hoursRequested" type="number" step="0.25" min="0">' +
+        '</div>' +
+      '</div>' +
+      '<label>Reason / Notes</label>' +
+      '<textarea id="reason"></textarea>' +
+      '<button onclick="submitRequest()">Submit Request</button>' +
+      '<p id="submitResult" class="muted"></p>' +
+    '</div>'
+  );
 }
 
 function renderAdminDashboard(requests) {
-  const filtered = filterAdminRequests(requests || []);
+  var pendingClass = ADMIN_FILTER === 'pending' ? ' active' : '';
+  var approvedClass = ADMIN_FILTER === 'approved' ? ' active' : '';
+  var deniedClass = ADMIN_FILTER === 'denied' ? ' active' : '';
+  var allClass = ADMIN_FILTER === 'all' ? ' active' : '';
 
-  return `
-    <div class="card">
-      <h2>Admin Dashboard</h2>
-
-      <button class="tab ${ADMIN_FILTER === 'pending' ? 'active' : ''}" onclick="setAdminFilter('pending')">Pending / Unapproved</button>
-      <button class="tab ${ADMIN_FILTER === 'approved' ? 'active' : ''}" onclick="setAdminFilter('approved')">Approved</button>
-      <button class="tab ${ADMIN_FILTER === 'denied' ? 'active' : ''}" onclick="setAdminFilter('denied')">Denied</button>
-      <button class="tab ${ADMIN_FILTER === 'all' ? 'active' : ''}" onclick="setAdminFilter('all')">All</button>
-
-      ${renderRequestsTable(filtered, true, false)}
-    </div>
-  `;
+  return (
+    '<div class="card">' +
+      '<h2>Admin Dashboard</h2>' +
+      '<button class="tab' + pendingClass + '" onclick="setAdminFilter(\'pending\')">Pending / Unapproved</button>' +
+      '<button class="tab' + approvedClass + '" onclick="setAdminFilter(\'approved\')">Approved</button>' +
+      '<button class="tab' + deniedClass + '" onclick="setAdminFilter(\'denied\')">Denied</button>' +
+      '<button class="tab' + allClass + '" onclick="setAdminFilter(\'all\')">All</button>' +
+      renderRequestsTable(filterAdminRequests(requests || []), true, false) +
+    '</div>'
+  );
 }
 
 function setAdminFilter(filter) {
@@ -361,191 +348,189 @@ function setAdminFilter(filter) {
 }
 
 function filterAdminRequests(requests) {
-  if (ADMIN_FILTER === 'approved') {
-    return requests.filter(r => r.Status === 'Approved');
+  var i;
+  var filtered = [];
+
+  for (i = 0; i < requests.length; i++) {
+    if (ADMIN_FILTER === 'approved' && requests[i].Status === 'Approved') {
+      filtered.push(requests[i]);
+    } else if (
+      ADMIN_FILTER === 'denied' &&
+      (requests[i].Status === 'Denied by Supervisor' || requests[i].Status === 'Denied by Admin')
+    ) {
+      filtered.push(requests[i]);
+    } else if (ADMIN_FILTER === 'all') {
+      filtered.push(requests[i]);
+    } else if (
+      ADMIN_FILTER === 'pending' &&
+      (requests[i].Status === 'Pending Supervisor Approval' ||
+        requests[i].Status === 'Pending Admin Final Approval')
+    ) {
+      filtered.push(requests[i]);
+    }
   }
 
-  if (ADMIN_FILTER === 'denied') {
-    return requests.filter(r =>
-      r.Status === 'Denied by Supervisor' ||
-      r.Status === 'Denied by Admin'
-    );
-  }
-
-  if (ADMIN_FILTER === 'all') {
-    return requests;
-  }
-
-  return requests.filter(r =>
-    r.Status === 'Pending Supervisor Approval' ||
-    r.Status === 'Pending Admin Final Approval'
-  );
+  return filtered;
 }
 
 function renderRequests(title, requests, adminMode, supervisorMode) {
-  return `
-    <div class="card">
-      <h2>${escapeHtml(title)}</h2>
-      ${renderRequestsTable(requests, adminMode, supervisorMode)}
-    </div>
-  `;
+  return (
+    '<div class="card">' +
+      '<h2>' + escapeHtml(title) + '</h2>' +
+      renderRequestsTable(requests, adminMode, supervisorMode) +
+    '</div>'
+  );
 }
 
 function renderRequestsTable(requests, adminMode, supervisorMode) {
+  var i;
+  var html = '';
+  var warningsHtml;
+
   if (!requests || !requests.length) {
-    return `<p class="muted">No requests found.</p>`;
+    return '<p class="muted">No requests found.</p>';
   }
 
-  const rows = requests.map(r => `
-    <tr>
-      <td>
-        <strong>${escapeHtml(r.EmployeeName || '')}</strong><br>
-        <span class="muted">${escapeHtml(r.EmployeeEmail || '')}</span>
-      </td>
-      <td>${escapeHtml(r.LeaveType || '')}</td>
-      <td>${escapeHtml(formatDate(r.StartDate))} to ${escapeHtml(formatDate(r.EndDate))}</td>
-      <td>${escapeHtml(r.HoursRequested || '')}</td>
-      <td><span class="pill">${escapeHtml(r.Status || '')}</span></td>
-      <td>${r.Warnings ? `<span class="warning">${escapeHtml(r.Warnings)}</span>` : ''}</td>
-      <td class="actions">${renderActions(r, adminMode, supervisorMode)}</td>
-    </tr>
-    <tr id="edit-row-${escapeAttr(r.RequestId)}" class="hidden">
-      <td colspan="7">
-        ${renderEditCard(r, adminMode, supervisorMode)}
-      </td>
-    </tr>
-  `).join('');
+  for (i = 0; i < requests.length; i++) {
+    warningsHtml = requests[i].Warnings
+      ? '<span class="warning">' + escapeHtml(requests[i].Warnings) + '</span>'
+      : '';
 
-  return `
-    <table>
-      <thead>
-        <tr>
-          <th>Employee</th>
-          <th>Type</th>
-          <th>Dates</th>
-          <th>Hours</th>
-          <th>Status</th>
-          <th>Warnings</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  `;
+    html +=
+      '<tr>' +
+        '<td><strong>' + escapeHtml(requests[i].EmployeeName || '') + '</strong><br><span class="muted">' + escapeHtml(requests[i].EmployeeEmail || '') + '</span></td>' +
+        '<td>' + escapeHtml(requests[i].LeaveType || '') + '</td>' +
+        '<td>' + escapeHtml(formatDate(requests[i].StartDate)) + ' to ' + escapeHtml(formatDate(requests[i].EndDate)) + '</td>' +
+        '<td>' + escapeHtml(requests[i].HoursRequested || '') + '</td>' +
+        '<td><span class="pill">' + escapeHtml(requests[i].Status || '') + '</span></td>' +
+        '<td>' + warningsHtml + '</td>' +
+        '<td class="actions">' + renderActions(requests[i], adminMode, supervisorMode) + '</td>' +
+      '</tr>' +
+      '<tr id="edit-row-' + escapeAttr(requests[i].RequestId) + '" class="hidden">' +
+        '<td colspan="7">' + renderEditCard(requests[i]) + '</td>' +
+      '</tr>';
+  }
+
+  return (
+    '<table>' +
+      '<thead>' +
+        '<tr>' +
+          '<th>Employee</th>' +
+          '<th>Type</th>' +
+          '<th>Dates</th>' +
+          '<th>Hours</th>' +
+          '<th>Status</th>' +
+          '<th>Warnings</th>' +
+          '<th>Action</th>' +
+        '</tr>' +
+      '</thead>' +
+      '<tbody>' + html + '</tbody>' +
+    '</table>'
+  );
 }
 
-function renderActions(r, adminMode, supervisorMode) {
+function renderActions(request, adminMode, supervisorMode) {
   if (adminMode) {
-    return renderAdminButtons(r);
+    return renderAdminButtons(request);
   }
 
   if (supervisorMode) {
-    return renderSupervisorButtons(r);
+    return renderSupervisorButtons(request);
   }
 
-  return renderStatusHint(r);
+  return renderStatusHint(request);
 }
 
-function renderStatusHint(r) {
-  if (r.Status === 'Pending Supervisor Approval') {
+function renderStatusHint(request) {
+  if (request.Status === 'Pending Supervisor Approval') {
     return '<span class="muted">Waiting on supervisor</span>';
   }
 
-  if (r.Status === 'Pending Admin Final Approval') {
+  if (request.Status === 'Pending Admin Final Approval') {
     return '<span class="muted">Waiting on final admin approval</span>';
   }
 
   return '';
 }
 
-function renderSupervisorButtons(r) {
-  if (r.Status !== 'Pending Supervisor Approval') {
+function renderSupervisorButtons(request) {
+  if (request.Status !== 'Pending Supervisor Approval') {
     return '';
   }
 
-  return `
-    <button class="secondary" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Edit</button>
-
-    <label style="font-weight:normal; display:block; margin-top:8px;">
-      <input type="checkbox" id="sup-override-${escapeAttr(r.RequestId)}" style="width:auto;">
-      Override balance if needed
-    </label>
-
-    <button onclick="supervisorDecision('${escapeAttr(r.RequestId)}','approve')">Approve</button>
-    <button class="danger" onclick="supervisorDecision('${escapeAttr(r.RequestId)}','deny')">Deny</button>
-  `;
+  return (
+    '<button class="secondary" onclick="toggleEditCard(\'' + escapeAttr(request.RequestId) + '\')">Edit</button>' +
+    '<label style="font-weight:normal; display:block; margin-top:8px;">' +
+      '<input type="checkbox" id="sup-override-' + escapeAttr(request.RequestId) + '" style="width:auto;">' +
+      ' Override balance if needed' +
+    '</label>' +
+    '<button onclick="supervisorDecision(\'' + escapeAttr(request.RequestId) + '\',\'approve\')">Approve</button>' +
+    '<button class="danger" onclick="supervisorDecision(\'' + escapeAttr(request.RequestId) + '\',\'deny\')">Deny</button>'
+  );
 }
 
-function renderAdminButtons(r) {
-  if (r.Status !== 'Pending Admin Final Approval' && r.Status !== 'Pending Supervisor Approval') {
+function renderAdminButtons(request) {
+  if (request.Status !== 'Pending Admin Final Approval' && request.Status !== 'Pending Supervisor Approval') {
     return '';
   }
 
-  return `
-    <button class="secondary" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Edit</button>
-
-    <label style="font-weight:normal; display:block; margin-top:8px;">
-      <input type="checkbox" id="override-${escapeAttr(r.RequestId)}" style="width:auto;">
-      Override balance if needed
-    </label>
-
-    <button onclick="adminDecision('${escapeAttr(r.RequestId)}','approve')">Final Approve</button>
-    <button class="danger" onclick="adminDecision('${escapeAttr(r.RequestId)}','deny')">Deny</button>
-  `;
+  return (
+    '<button class="secondary" onclick="toggleEditCard(\'' + escapeAttr(request.RequestId) + '\')">Edit</button>' +
+    '<label style="font-weight:normal; display:block; margin-top:8px;">' +
+      '<input type="checkbox" id="override-' + escapeAttr(request.RequestId) + '" style="width:auto;">' +
+      ' Override balance if needed' +
+    '</label>' +
+    '<button onclick="adminDecision(\'' + escapeAttr(request.RequestId) + '\',\'approve\')">Final Approve</button>' +
+    '<button class="danger" onclick="adminDecision(\'' + escapeAttr(request.RequestId) + '\',\'deny\')">Deny</button>'
+  );
 }
 
-function renderEditCard(r, adminMode, supervisorMode) {
-  return `
-    <div class="card edit-card">
-      <h3>Edit Request Before Approval</h3>
-      <p class="muted">
-        Changes made here update the pending request before approval. Approved requests should be changed through a separate correction process.
-      </p>
-
-      <div class="grid">
-        <div>
-          <label>Start Date</label>
-          <input id="edit-start-${escapeAttr(r.RequestId)}" type="date" value="${escapeAttr(formatDate(r.StartDate))}">
-        </div>
-
-        <div>
-          <label>End Date</label>
-          <input id="edit-end-${escapeAttr(r.RequestId)}" type="date" value="${escapeAttr(formatDate(r.EndDate))}">
-        </div>
-
-        <div>
-          <label>Hours Requested</label>
-          <input id="edit-hours-${escapeAttr(r.RequestId)}" type="number" step="0.25" min="0" value="${escapeAttr(r.HoursRequested || '')}">
-        </div>
-      </div>
-
-      <label>Reason / Notes</label>
-      <textarea id="edit-reason-${escapeAttr(r.RequestId)}">${escapeHtml(r.Reason || '')}</textarea>
-
-      <button onclick="saveRequestEdit('${escapeAttr(r.RequestId)}')">Save Changes</button>
-      <button class="light" onclick="toggleEditCard('${escapeAttr(r.RequestId)}')">Cancel</button>
-      <p id="edit-result-${escapeAttr(r.RequestId)}" class="muted"></p>
-    </div>
-  `;
+function renderEditCard(request) {
+  return (
+    '<div class="card edit-card">' +
+      '<h3>Edit Request Before Approval</h3>' +
+      '<p class="muted">Changes made here update the pending request before approval. Approved requests should be changed through a separate correction process.</p>' +
+      '<div class="grid">' +
+        '<div>' +
+          '<label>Start Date</label>' +
+          '<input id="edit-start-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.StartDate)) + '">' +
+        '</div>' +
+        '<div>' +
+          '<label>End Date</label>' +
+          '<input id="edit-end-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.EndDate)) + '">' +
+        '</div>' +
+        '<div>' +
+          '<label>Hours Requested</label>' +
+          '<input id="edit-hours-' + escapeAttr(request.RequestId) + '" type="number" step="0.25" min="0" value="' + escapeAttr(request.HoursRequested || '') + '">' +
+        '</div>' +
+      '</div>' +
+      '<label>Reason / Notes</label>' +
+      '<textarea id="edit-reason-' + escapeAttr(request.RequestId) + '">' + escapeHtml(request.Reason || '') + '</textarea>' +
+      '<button onclick="saveRequestEdit(\'' + escapeAttr(request.RequestId) + '\')">Save Changes</button>' +
+      '<button class="light" onclick="toggleEditCard(\'' + escapeAttr(request.RequestId) + '\')">Cancel</button>' +
+      '<p id="edit-result-' + escapeAttr(request.RequestId) + '" class="muted"></p>' +
+    '</div>'
+  );
 }
 
 function toggleEditCard(requestId) {
-  const row = document.getElementById('edit-row-' + requestId);
-
-  if (!row) {
-    return;
+  var row = document.getElementById('edit-row-' + requestId);
+  if (row) {
+    if (row.className.indexOf('hidden') >= 0) {
+      row.className = row.className.replace('hidden', '').trim();
+    } else {
+      row.className += ' hidden';
+    }
   }
-
-  row.classList.toggle('hidden');
 }
 
 function saveRequestEdit(requestId) {
-  const startDate = document.getElementById('edit-start-' + requestId).value;
-  const endDate = document.getElementById('edit-end-' + requestId).value;
-  const hoursRequested = document.getElementById('edit-hours-' + requestId).value;
-  const reason = document.getElementById('edit-reason-' + requestId).value;
+  var startDate = document.getElementById('edit-start-' + requestId).value;
+  var endDate = document.getElementById('edit-end-' + requestId).value;
+  var hoursRequested = document.getElementById('edit-hours-' + requestId).value;
+  var reason = document.getElementById('edit-reason-' + requestId).value;
+  var result = document.getElementById('edit-result-' + requestId);
 
-  const result = document.getElementById('edit-result-' + requestId);
   result.innerText = 'Saving...';
 
   google.script.run
@@ -564,96 +549,8 @@ function saveRequestEdit(requestId) {
     });
 }
 
-function updateRequestDetails(requestId, payload) {
-  const user = getCurrentUser_();
-  const request = getRequestById_(requestId);
-
-  if (!request) {
-    throw new Error('Request not found.');
-  }
-
-  const isAssignedSupervisor =
-    lower_(request.SupervisorEmail) === lower_(user.email);
-
-  const isAdminUser = isAdmin_(user.email);
-
-  if (!isAssignedSupervisor && !isAdminUser) {
-    throw new Error('Only the assigned supervisor or an admin can edit this request.');
-  }
-
-  if (
-    request.Status !== STATUS.PENDING_SUPERVISOR &&
-    request.Status !== STATUS.PENDING_ADMIN
-  ) {
-    throw new Error('Only pending requests can be edited.');
-  }
-
-  const employee = getEmployeeByEmail_(request.EmployeeEmail);
-
-  if (!employee) {
-    throw new Error('Employee not found.');
-  }
-
-  const startDate = String(payload.startDate || '').trim();
-  const endDate = String(payload.endDate || '').trim();
-  const hoursRequested = Number(payload.hoursRequested || 0);
-  const reason = String(payload.reason || '').trim();
-
-  if (!startDate || !endDate) {
-    throw new Error('Start date and end date are required.');
-  }
-
-  if (!hoursRequested || hoursRequested <= 0) {
-    throw new Error('Hours requested must be greater than 0.');
-  }
-
-  if (new Date(endDate) < new Date(startDate)) {
-    throw new Error('End date cannot be before start date.');
-  }
-
-  const employeeRequests = getRequests_().filter(function (r) {
-    return lower_(r.EmployeeEmail) === lower_(request.EmployeeEmail) &&
-      String(r.RequestId) !== String(requestId);
-  });
-
-  const warnings = validateRequest_(
-    employee,
-    request.LeaveType,
-    startDate,
-    endDate,
-    hoursRequested,
-    employeeRequests,
-    true
-  );
-
-  const updates = {
-    StartDate: startDate,
-    EndDate: endDate,
-    HoursRequested: hoursRequested,
-    Reason: reason,
-    Warnings: warnings.join(' | '),
-    UpdatedAt: now_()
-  };
-
-  updateRequest_(requestId, updates);
-
-  audit_(
-    user.email,
-    'Edited PTO request details',
-    requestId,
-    JSON.stringify(updates)
-  );
-
-  return makeClientSafe_({
-    ok: true,
-    message: warnings.length
-      ? 'Request updated with warning(s): ' + warnings.join(' ')
-      : 'Request updated.'
-  });
-}
-
 function submitRequest() {
-  const payload = {
+  var payload = {
     leaveType: document.getElementById('leaveType').value,
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
@@ -675,10 +572,9 @@ function submitRequest() {
 }
 
 function supervisorDecision(requestId, decision) {
-  const overrideBox = document.getElementById('sup-override-' + requestId);
-  const overrideBalance = overrideBox ? overrideBox.checked : false;
-
-  const note = prompt('Optional note for this decision:', '') || '';
+  var overrideBox = document.getElementById('sup-override-' + requestId);
+  var overrideBalance = overrideBox ? overrideBox.checked : false;
+  var note = prompt('Optional note for this decision:', '') || '';
 
   google.script.run
     .withSuccessHandler(function(res) {
@@ -690,10 +586,9 @@ function supervisorDecision(requestId, decision) {
 }
 
 function adminDecision(requestId, decision) {
-  const overrideBox = document.getElementById('override-' + requestId);
-  const overrideBalance = overrideBox ? overrideBox.checked : false;
-
-  const note = prompt('Optional note for this decision:', '') || '';
+  var overrideBox = document.getElementById('override-' + requestId);
+  var overrideBalance = overrideBox ? overrideBox.checked : false;
+  var note = prompt('Optional note for this decision:', '') || '';
 
   google.script.run
     .withSuccessHandler(function(res) {
@@ -704,18 +599,20 @@ function adminDecision(requestId, decision) {
     .adminDecision(requestId, decision, note, overrideBalance);
 }
 
-function formatDate(v) {
-  if (!v) return '';
-
-  if (typeof v === 'string') {
-    return v.substring(0, 10);
+function formatDate(value) {
+  if (!value) {
+    return '';
   }
 
-  return String(v).substring(0, 10);
+  if (typeof value === 'string') {
+    return value.substring(0, 10);
+  }
+
+  return String(value).substring(0, 10);
 }
 
 function getAccountChooserUrl() {
-  const target = window.location.href;
+  var target = window.location.href;
   return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(target);
 }
 
@@ -727,17 +624,17 @@ function reloadApp() {
   window.location.reload();
 }
 
-function escapeHtml(s) {
-  return String(s || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
-function escapeAttr(s) {
-  return escapeHtml(s).replaceAll(' ', '');
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/ /g, '');
 }
 
 try {
