@@ -66,6 +66,7 @@ function getBootstrapData() {
       message: err && err.message
         ? err.message
         : 'Could not determine your Google account.',
+      webAppUrl: getWebAppUrl_(),
       user: {
         email: ''
       }
@@ -85,6 +86,7 @@ function getBootstrapData() {
     return makeClientSafe_({
       ok: false,
       message: 'Your Google account was recognized, but your email is not listed in the PTO Employees sheet.',
+      webAppUrl: getWebAppUrl_(),
       user: user
     });
   }
@@ -100,6 +102,7 @@ function getBootstrapData() {
     return makeClientSafe_({
       ok: false,
       message: 'Your PTO account is currently inactive.',
+      webAppUrl: getWebAppUrl_(),
       user: user
     });
   }
@@ -125,6 +128,7 @@ function getBootstrapData() {
   return makeClientSafe_({
     ok: true,
     user: user,
+    webAppUrl: getWebAppUrl_(),
     employee: employee,
     isAdmin: isAdminUser,
     isSupervisor: isSupervisorUser,
@@ -133,6 +137,14 @@ function getBootstrapData() {
     supervisorRequests: sortRequests_(supervisorRequests),
     allRequests: sortRequests_(allRequests)
   });
+}
+
+function getWebAppUrl_() {
+  try {
+    return ScriptApp.getService().getUrl() || '';
+  } catch (err) {
+    return '';
+  }
 }
 
 /*******************************
