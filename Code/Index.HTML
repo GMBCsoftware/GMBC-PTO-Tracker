@@ -155,13 +155,45 @@
 <script>
 let DATA = null;
 let ADMIN_FILTER = 'pending';
+let BOOTSTRAP_TIMEOUT = null;
+const BOOTSTRAP_TIMEOUT_MS = 15000;
+
+function startBootstrapTimeout() {
+  clearBootstrapTimeout();
+  BOOTSTRAP_TIMEOUT = window.setTimeout(function() {
+    showError(
+      'The PTO app did not receive a response from Google Apps Script. If you just changed the project, confirm the latest code was saved and redeployed, then reload this page.'
+    );
+  }, BOOTSTRAP_TIMEOUT_MS);
+}
+
+function clearBootstrapTimeout() {
+  if (BOOTSTRAP_TIMEOUT) {
+    window.clearTimeout(BOOTSTRAP_TIMEOUT);
+    BOOTSTRAP_TIMEOUT = null;
+  }
+}
 
 function load() {
   const app = document.getElementById('app');
   app.innerHTML = '<p>Loading PTO data...</p>';
 
+  if (
+    typeof google === 'undefined' ||
+    !google.script ||
+    !google.script.run
+  ) {
+    showError(
+      'Google Apps Script client services are unavailable on this page. Open the deployed web app URL directly from Apps Script and try again.'
+    );
+    return;
+  }
+
+  startBootstrapTimeout();
+
   google.script.run
     .withSuccessHandler(function(data) {
+      clearBootstrapTimeout();
       try {
         render(data);
       } catch (err) {
@@ -169,12 +201,14 @@ function load() {
       }
     })
     .withFailureHandler(function(err) {
+      clearBootstrapTimeout();
       showError(err);
     })
     .getBootstrapData();
 }
 
 function showError(err) {
+  clearBootstrapTimeout();
   const msg = err && err.message ? err.message : String(err);
   document.getElementById('app').innerHTML = `
     <h2>Something went wrong</h2>
@@ -684,7 +718,7 @@ function switchGoogleAccount() {
 }
 
 function reloadApp() {
-  window.top.location.reload();
+  window.location.reload();
 }
 
 function escapeHtml(s) {
