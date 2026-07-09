@@ -613,7 +613,8 @@ function formatDate(value) {
 
 function getAccountChooserUrl() {
   var target = window.location.href;
-  return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(target);
+  var appEngineLogout = 'https://appengine.google.com/_ah/logout?continue=' + encodeURIComponent(target);
+  return 'https://accounts.google.com/Logout?continue=' + encodeURIComponent(appEngineLogout);
 }
 
 function switchGoogleAccount() {
