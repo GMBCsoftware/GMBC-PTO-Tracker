@@ -153,6 +153,12 @@
 </div>
 
 <script>
+var APP_BOOT_ELEMENT = document.getElementById('app');
+
+if (APP_BOOT_ELEMENT) {
+  APP_BOOT_ELEMENT.innerHTML = '<p>Booting PTO app...</p>';
+}
+
 let DATA = null;
 let ADMIN_FILTER = 'pending';
 let BOOTSTRAP_TIMEOUT = null;
@@ -734,7 +740,11 @@ function escapeAttr(s) {
   return escapeHtml(s).replaceAll(' ', '');
 }
 
-load();
+try {
+  load();
+} catch (err) {
+  showError(err);
+}
 </script>
 </body>
 </html>
