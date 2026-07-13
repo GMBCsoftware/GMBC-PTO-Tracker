@@ -12,11 +12,22 @@ const SHEETS = {
 
 const STATUS = {
   PENDING_SUPERVISOR: 'Pending Supervisor Approval',
+  PENDING_SUPERVISOR_EDIT: 'Pending Supervisor Reapproval',
   DENIED_SUPERVISOR: 'Denied by Supervisor',
+  DENIED_SUPERVISOR_EDIT: 'Edit Denied by Supervisor',
   PENDING_ADMIN: 'Pending Admin Final Approval',
+  PENDING_ADMIN_EDIT: 'Pending Admin Reapproval',
   DENIED_ADMIN: 'Denied by Admin',
-  APPROVED: 'Approved'
+  DENIED_ADMIN_EDIT: 'Edit Denied by Admin',
+  APPROVED: 'Approved',
+  APPROVED_EDIT: 'Edit Approved'
 };
+
+const REQUEST_METADATA_COLUMNS = [
+  'ChangeType',
+  'OriginalRequestId',
+  'PreviousVersionJson'
+];
 
 const LEAVE_TYPES = {
   ANNUAL: 'Annual Leave',
@@ -47,6 +58,7 @@ function include(filename) {
  *******************************/
 
 function getBootstrapData() {
+  ensureRequestSheetColumns_();
   let user;
 
   try {
@@ -118,7 +130,10 @@ function getBootstrapData() {
 
   const supervisorRequests = allRequestsRaw.filter(function (r) {
     return lower_(r.SupervisorEmail) === lower_(employee.Email) &&
-      r.Status === STATUS.PENDING_SUPERVISOR;
+      (
+        r.Status === STATUS.PENDING_SUPERVISOR ||
+        r.Status === STATUS.PENDING_SUPERVISOR_EDIT
+      );
   });
 
   const allRequests = isAdminUser ? allRequestsRaw : [];
@@ -152,6 +167,7 @@ function getWebAppUrl_() {
  *******************************/
 
 function submitRequest(payload) {
+  ensureRequestSheetColumns_();
   const user = getCurrentUser_();
   const employee = getEmployeeByEmail_(user.email);
 
@@ -212,6 +228,9 @@ function submitRequest(payload) {
     AdminDecisionDate: '',
     CalendarEventId: '',
     Warnings: warnings.join(' | '),
+    ChangeType: '',
+    OriginalRequestId: '',
+    PreviousVersionJson: '',
     CreatedAt: now_(),
     UpdatedAt: now_()
   };
@@ -240,6 +259,7 @@ function submitRequest(payload) {
  *******************************/
 
 function supervisorDecision(requestId, decision, note, overrideBalance) {
+  ensureRequestSheetColumns_();
   const user = getCurrentUser_();
   const request = getRequestById_(requestId);
 
@@ -254,18 +274,37 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
     throw new Error('Only the assigned supervisor or an admin can make this decision.');
   }
 
-  if (request.Status !== STATUS.PENDING_SUPERVISOR) {
+  if (
+    request.Status !== STATUS.PENDING_SUPERVISOR &&
+    request.Status !== STATUS.PENDING_SUPERVISOR_EDIT
+  ) {
     throw new Error('This request is not waiting for supervisor approval.');
   }
 
   const approved = decision === 'approve';
+  const isEditRequest = isEditRequest_(request);
 
   let warnings = String(request.Warnings || '');
 
   if (approved) {
     const employee = getEmployeeByEmail_(request.EmployeeEmail);
     const employeeRequests = getRequests_().filter(function (r) {
-      return lower_(r.EmployeeEmail) === lower_(request.EmployeeEmail);
+      if (lower_(r.EmployeeEmail) !== lower_(request.EmployeeEmail)) {
+        return false;
+      }
+
+      if (String(r.RequestId) === String(requestId)) {
+        return false;
+      }
+
+      if (
+        isEditRequest &&
+        String(r.RequestId) === String(request.OriginalRequestId)
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     const warningArray = validateRequest_(
@@ -284,7 +323,9 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
   const updates = {
     SupervisorDecision: approved ? 'Approved' : 'Denied',
     SupervisorDecisionDate: now_(),
-    Status: approved ? STATUS.PENDING_ADMIN : STATUS.DENIED_SUPERVISOR,
+    Status: approved
+      ? (isEditRequest ? STATUS.PENDING_ADMIN_EDIT : STATUS.PENDING_ADMIN)
+      : (isEditRequest ? STATUS.DENIED_SUPERVISOR_EDIT : STATUS.DENIED_SUPERVISOR),
     Warnings: warnings,
     UpdatedAt: now_()
   };
@@ -309,9 +350,13 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
   } else {
     sendEmployeeEmail_(
       request.EmployeeEmail,
-      'Time off request denied by supervisor',
+      isEditRequest
+        ? 'Time off request change denied by supervisor'
+        : 'Time off request denied by supervisor',
       'Your ' + request.LeaveType + ' request from ' + request.StartDate + ' to ' + request.EndDate +
-      ' was denied by your supervisor.' +
+      (isEditRequest
+        ? ' change was denied by your supervisor. Your previously approved schedule remains unchanged.'
+        : ' was denied by your supervisor.') +
       (note ? '\n\nNote: ' + note : '')
     );
   }
@@ -327,6 +372,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
  *******************************/
 
 function adminDecision(requestId, decision, note, overrideBalance) {
+  ensureRequestSheetColumns_();
   const user = getCurrentUser_();
 
   if (!isAdmin_(user.email)) {
@@ -341,19 +387,37 @@ function adminDecision(requestId, decision, note, overrideBalance) {
 
   if (
     request.Status !== STATUS.PENDING_ADMIN &&
-    request.Status !== STATUS.PENDING_SUPERVISOR
+    request.Status !== STATUS.PENDING_SUPERVISOR &&
+    request.Status !== STATUS.PENDING_ADMIN_EDIT &&
+    request.Status !== STATUS.PENDING_SUPERVISOR_EDIT
   ) {
     throw new Error('This request is not waiting for admin approval.');
   }
 
   const employee = getEmployeeByEmail_(request.EmployeeEmail);
+  const isEditRequest = isEditRequest_(request);
 
   if (!employee) {
     throw new Error('Employee not found.');
   }
 
   const employeeRequests = getRequests_().filter(function (r) {
-    return lower_(r.EmployeeEmail) === lower_(request.EmployeeEmail);
+    if (lower_(r.EmployeeEmail) !== lower_(request.EmployeeEmail)) {
+      return false;
+    }
+
+    if (String(r.RequestId) === String(requestId)) {
+      return false;
+    }
+
+    if (
+      isEditRequest &&
+      String(r.RequestId) === String(request.OriginalRequestId)
+    ) {
+      return false;
+    }
+
+    return true;
   });
 
   const warnings = validateRequest_(
@@ -371,13 +435,19 @@ function adminDecision(requestId, decision, note, overrideBalance) {
   let calendarEventId = '';
 
   if (approved) {
-    calendarEventId = createCalendarEvent_(employee, request);
+    if (isEditRequest) {
+      calendarEventId = applyApprovedEditRequest_(request, employee, warnings);
+    } else {
+      calendarEventId = createCalendarEvent_(employee, request);
+    }
   }
 
   const updates = {
     AdminDecision: approved ? 'Approved' : 'Denied',
     AdminDecisionDate: now_(),
-    Status: approved ? STATUS.APPROVED : STATUS.DENIED_ADMIN,
+    Status: approved
+      ? (isEditRequest ? STATUS.APPROVED_EDIT : STATUS.APPROVED)
+      : (isEditRequest ? STATUS.DENIED_ADMIN_EDIT : STATUS.DENIED_ADMIN),
     CalendarEventId: calendarEventId,
     Warnings: warnings.join(' | '),
     UpdatedAt: now_()
@@ -395,25 +465,37 @@ function adminDecision(requestId, decision, note, overrideBalance) {
       warnings: warnings
     })
   );
-
-  if (approved) {
-    sendEmployeeEmail_(
-      request.EmployeeEmail,
-      'Time off request approved',
-      'Your ' + request.LeaveType + ' request has received final approval.\n\n' +
-      'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
-      'Hours: ' + request.HoursRequested + '\n\n' +
-      (warnings.length ? 'Warning(s): ' + warnings.join(' ') : '')
-    );
-  } else {
-    sendEmployeeEmail_(
-      request.EmployeeEmail,
-      'Time off request denied',
-      'Your ' + request.LeaveType + ' request from ' + request.StartDate + ' to ' + request.EndDate +
-      ' was denied by admin.' +
-      (note ? '\n\nNote: ' + note : '')
-    );
-  }
+  
+if (approved) {
+  sendEmployeeEmail_(
+    request.EmployeeEmail,
+    isEditRequest
+      ? 'Time off request change approved'
+      : 'Time off request approved',
+    'Your ' + request.LeaveType +
+    ' request has received final approval.\n\n' +
+    'Dates: ' + formattedDateRange + '\n' +
+    'Hours: ' + request.HoursRequested +
+    (warnings.length
+      ? '\n\nWarning(s): ' + warnings.join(' ')
+      : '')
+  );
+} else {
+  sendEmployeeEmail_(
+    request.EmployeeEmail,
+    isEditRequest
+      ? 'Time off request change denied'
+      : 'Time off request denied',
+    'Your ' + request.LeaveType +
+    ' request from ' + formattedDateRange +
+    (isEditRequest
+      ? ' was denied by admin. Your previously approved schedule remains unchanged.'
+      : ' was denied by admin.') +
+    (note
+      ? '\n\nNote: ' + note
+      : '')
+  );
+}
 
   return {
     ok: true,
@@ -421,6 +503,7 @@ function adminDecision(requestId, decision, note, overrideBalance) {
   };
 }
 function updateRequestDetails(requestId, payload) {
+  ensureRequestSheetColumns_();
   const user = getCurrentUser_();
   const request = getRequestById_(requestId);
 
@@ -428,20 +511,13 @@ function updateRequestDetails(requestId, payload) {
     throw new Error('Request not found.');
   }
 
+  const isEmployeeOwner = lower_(request.EmployeeEmail) === lower_(user.email);
   const isAssignedSupervisor =
     lower_(request.SupervisorEmail) === lower_(user.email);
-
   const isAdminUser = isAdmin_(user.email);
 
-  if (!isAssignedSupervisor && !isAdminUser) {
-    throw new Error('Only the assigned supervisor or an admin can edit this request.');
-  }
-
-  if (
-    request.Status !== STATUS.PENDING_SUPERVISOR &&
-    request.Status !== STATUS.PENDING_ADMIN
-  ) {
-    throw new Error('Only pending requests can be edited.');
+  if (!isEmployeeOwner && !isAssignedSupervisor && !isAdminUser) {
+    throw new Error('Only the employee, assigned supervisor, or an admin can edit this request.');
   }
 
   const employee = getEmployeeByEmail_(request.EmployeeEmail);
@@ -468,8 +544,22 @@ function updateRequestDetails(requestId, payload) {
   }
 
   const employeeRequests = getRequests_().filter(function (r) {
-    return lower_(r.EmployeeEmail) === lower_(request.EmployeeEmail) &&
-      String(r.RequestId) !== String(requestId);
+    if (lower_(r.EmployeeEmail) !== lower_(request.EmployeeEmail)) {
+      return false;
+    }
+
+    if (String(r.RequestId) === String(requestId)) {
+      return false;
+    }
+
+    if (
+      isEditRequest_(request) &&
+      String(r.RequestId) === String(request.OriginalRequestId)
+    ) {
+      return false;
+    }
+
+    return true;
   });
 
   const warnings = validateRequest_(
@@ -481,6 +571,29 @@ function updateRequestDetails(requestId, payload) {
     employeeRequests,
     true
   );
+
+  if (
+    isEmployeeOwner &&
+    request.Status === STATUS.APPROVED &&
+    !isEditRequest_(request)
+  ) {
+    return createApprovedRequestEdit_(request, employee, {
+      startDate: startDate,
+      endDate: endDate,
+      hoursRequested: hoursRequested,
+      reason: reason,
+      warnings: warnings
+    });
+  }
+
+  if (
+    request.Status !== STATUS.PENDING_SUPERVISOR &&
+    request.Status !== STATUS.PENDING_ADMIN &&
+    request.Status !== STATUS.PENDING_SUPERVISOR_EDIT &&
+    request.Status !== STATUS.PENDING_ADMIN_EDIT
+  ) {
+    throw new Error('This request cannot be edited in its current status.');
+  }
 
   const updates = {
     StartDate: startDate,
@@ -508,6 +621,69 @@ function updateRequestDetails(requestId, payload) {
   });
 }
 
+function createApprovedRequestEdit_(request, employee, payload) {
+  const pendingEdit = getRequests_().find(function (row) {
+    return isEditRequest_(row) &&
+      String(row.OriginalRequestId) === String(request.RequestId) &&
+      (
+        row.Status === STATUS.PENDING_SUPERVISOR_EDIT ||
+        row.Status === STATUS.PENDING_ADMIN_EDIT
+      );
+  });
+
+  if (pendingEdit) {
+    throw new Error('There is already a pending schedule change for this approved request.');
+  }
+
+  const editRequest = {
+    RequestId: Utilities.getUuid(),
+    EmployeeEmail: request.EmployeeEmail,
+    EmployeeName: request.EmployeeName,
+    LeaveType: request.LeaveType,
+    StartDate: payload.startDate,
+    EndDate: payload.endDate,
+    HoursRequested: payload.hoursRequested,
+    Reason: payload.reason,
+    Status: STATUS.PENDING_SUPERVISOR_EDIT,
+    SupervisorEmail: request.SupervisorEmail || employee.SupervisorEmail,
+    SupervisorDecision: '',
+    SupervisorDecisionDate: '',
+    AdminDecision: '',
+    AdminDecisionDate: '',
+    CalendarEventId: '',
+    Warnings: payload.warnings.join(' | '),
+    ChangeType: 'edit',
+    OriginalRequestId: request.RequestId,
+    PreviousVersionJson: JSON.stringify({
+      StartDate: request.StartDate,
+      EndDate: request.EndDate,
+      HoursRequested: request.HoursRequested,
+      Reason: request.Reason,
+      CalendarEventId: request.CalendarEventId
+    }),
+    CreatedAt: now_(),
+    UpdatedAt: now_()
+  };
+
+  appendObject_(SHEETS.REQUESTS, editRequest);
+
+  audit_(
+    request.EmployeeEmail,
+    'Submitted approved PTO request change',
+    editRequest.RequestId,
+    JSON.stringify(editRequest)
+  );
+
+  sendEditApprovalRequestEmails_(editRequest);
+
+  return makeClientSafe_({
+    ok: true,
+    message: payload.warnings.length
+      ? 'Updated schedule submitted for reapproval with warning(s): ' + payload.warnings.join(' ')
+      : 'Updated schedule submitted for reapproval.'
+  });
+}
+
 /*******************************
  * Balance + Policy Rules
  *******************************/
@@ -515,6 +691,7 @@ function updateRequestDetails(requestId, payload) {
 function calculateBalances_(employee, requests) {
   const annualAllowance = getAnnualLeaveAllowanceHours_(employee);
   const personalAllowance = getPersonalLeaveAllowanceHours_(employee);
+  const seriousAllowance = getSeriousLeaveAllowanceHours_(employee);
 
   const approvedThisCycle = getApprovedRequestsInCurrentAnniversaryCycle_(
     employee,
@@ -543,9 +720,9 @@ function calculateBalances_(employee, requests) {
     },
     serious: {
       label: LEAVE_TYPES.SERIOUS,
-      allowanceHours: 'No cap',
+      allowanceHours: seriousAllowance,
       usedHours: seriousUsed,
-      availableHours: 'No cap'
+      availableHours: seriousAllowance - seriousUsed
     },
     bereavement: {
       label: LEAVE_TYPES.BEREAVEMENT,
@@ -597,6 +774,10 @@ function getPersonalLeaveAllowanceHours_(employee) {
     return 0;
   }
 
+  return 48;
+}
+
+function getSeriousLeaveAllowanceHours_(employee) {
   return 48;
 }
 
@@ -675,9 +856,25 @@ function validateRequest_(
   }
 
   if (leaveType === LEAVE_TYPES.SERIOUS) {
-    warnings.push(
-      'Serious Illness Leave has no cap, but should still be reviewed case-by-case.'
-    );
+    const available = Number(balances.serious.availableHours);
+
+    if (hoursRequested > available) {
+      warnings.push(
+        'This request exceeds available Serious Illness Leave by ' +
+        (hoursRequested - available) +
+        ' hour(s).'
+      );
+
+      if (overrideBalance) {
+        warnings.push(
+          'Balance override allowed. This will create a negative Serious Illness Leave balance until the next anniversary reset.'
+        );
+      } else {
+        warnings.push(
+          'Supervisor/Admin may override this later, but the request is currently over balance.'
+        );
+      }
+    }
   }
 
   if (truthy_(employee.IsPastoralStaff)) {
@@ -813,18 +1010,7 @@ function dailyAnniversaryRefresh() {
  *******************************/
 
 function createCalendarEvent_(employee, request) {
-  const settings = getSettings_();
-
-  const employeeCalendarId = String(employee.CalendarId || '').trim();
-  const settingsCalendarId = String(settings.PtoCalendarId || '').trim();
-
-  const calendarId = employeeCalendarId || settingsCalendarId || 'primary';
-
-  const calendar = CalendarApp.getCalendarById(calendarId);
-
-  if (!calendar) {
-    throw new Error('Could not find PTO calendar: ' + calendarId);
-  }
+  const calendar = getCalendarForEmployee_(employee);
 
   const start = parseLocalDate_(request.StartDate);
   const listedEnd = parseLocalDate_(request.EndDate);
@@ -856,6 +1042,75 @@ function createCalendarEvent_(employee, request) {
   return event.getId();
 }
 
+function deleteCalendarEvent_(employee, calendarEventId) {
+  if (!calendarEventId) {
+    return;
+  }
+
+  const calendar = getCalendarForEmployee_(employee);
+  const event = calendar.getEventById(calendarEventId);
+
+  if (event) {
+    event.deleteEvent();
+  }
+}
+
+function getCalendarForEmployee_(employee) {
+  const settings = getSettings_();
+
+  const employeeCalendarId = String(employee.CalendarId || '').trim();
+  const settingsCalendarId = String(settings.PtoCalendarId || '').trim();
+
+  const calendarId = employeeCalendarId || settingsCalendarId || 'primary';
+  const calendar = CalendarApp.getCalendarById(calendarId);
+
+  if (!calendar) {
+    throw new Error('Could not find PTO calendar: ' + calendarId);
+  }
+
+  return calendar;
+}
+
+function applyApprovedEditRequest_(editRequest, employee, warnings) {
+  const originalRequest = getRequestById_(editRequest.OriginalRequestId);
+
+  if (!originalRequest) {
+    throw new Error('Original approved request not found for this schedule change.');
+  }
+
+  const calendarEventId = createCalendarEvent_(employee, editRequest);
+
+  deleteCalendarEvent_(employee, originalRequest.CalendarEventId);
+
+  updateRequest_(originalRequest.RequestId, {
+    StartDate: editRequest.StartDate,
+    EndDate: editRequest.EndDate,
+    HoursRequested: editRequest.HoursRequested,
+    Reason: editRequest.Reason,
+    Warnings: warnings.join(' | '),
+    Status: STATUS.APPROVED,
+    SupervisorDecision: 'Approved',
+    SupervisorDecisionDate: editRequest.SupervisorDecisionDate || now_(),
+    AdminDecision: 'Approved',
+    AdminDecisionDate: now_(),
+    CalendarEventId: calendarEventId,
+    UpdatedAt: now_()
+  });
+
+  audit_(
+    'system',
+    'Applied approved PTO schedule change',
+    originalRequest.RequestId,
+    JSON.stringify({
+      editRequestId: editRequest.RequestId,
+      calendarEventId: calendarEventId
+    })
+  );
+
+  return calendarEventId;
+}
+
+
 /*******************************
  * Email
  *******************************/
@@ -873,16 +1128,42 @@ function sendSupervisorEmail_(request) {
 
   const subject = 'PTO request needs your approval - ' + request.EmployeeName;
 
+  const formattedDates =
+    formatPtoDate_(request.StartDate) +
+    ' to ' +
+    formatPtoDate_(request.EndDate);
+
   const body =
     request.EmployeeName + ' submitted a ' + request.LeaveType + ' request.\n\n' +
-    'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
+    'Dates: ' + formattedDates + '\n' +
     'Hours: ' + request.HoursRequested + '\n' +
-    'Reason: ' + (request.Reason || '') + '\n\n' +
+    'Reason: ' + (request.Reason || 'No reason provided') + '\n\n' +
     'Please open the PTO app to approve or deny this request.\n\n' +
     'Request ID:\n' + request.RequestId;
 
-  GmailApp.sendEmail(request.SupervisorEmail, subject, body);
+  const htmlBody = buildPtoEmailHtml_({
+    eyebrow: 'Supervisor Approval Required',
+    title: 'New PTO Request',
+    intro:
+      '<strong>' + escapeHtml_(request.EmployeeName) + '</strong> submitted a ' +
+      '<strong>' + escapeHtml_(request.LeaveType) + '</strong> request.',
+    details: [
+      ['Employee', request.EmployeeName],
+      ['Leave type', request.LeaveType],
+      ['Dates', formattedDates],
+      ['Hours requested', request.HoursRequested],
+      ['Reason', request.Reason || 'No reason provided']
+    ],
+    notice:
+      'Please open the PTO app to approve or deny this request.',
+    requestId: request.RequestId
+  });
+
+  GmailApp.sendEmail(request.SupervisorEmail, subject, body, {
+    htmlBody: htmlBody
+  });
 }
+
 
 function sendAdminFinalApprovalEmail_(request) {
   const settings = getSettings_();
@@ -903,22 +1184,420 @@ function sendAdminFinalApprovalEmail_(request) {
     return;
   }
 
-  const subject = 'PTO request ready for final approval - ' + request.EmployeeName;
+  const subject =
+    'PTO request ready for final approval - ' + request.EmployeeName;
+
+  const formattedDates =
+    formatPtoDate_(request.StartDate) +
+    ' to ' +
+    formatPtoDate_(request.EndDate);
 
   const body =
-    request.EmployeeName + '\'s ' + request.LeaveType + ' request was approved by their supervisor and is ready for final admin approval.\n\n' +
-    'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
+    request.EmployeeName + '\'s ' +
+    request.LeaveType +
+    ' request was approved by their supervisor and is ready for final admin approval.\n\n' +
+    'Dates: ' + formattedDates + '\n' +
     'Hours: ' + request.HoursRequested + '\n' +
     'Warnings: ' + (request.Warnings || 'None') + '\n\n' +
     'Please open the PTO app to give final approval or denial.\n\n' +
     'Request ID:\n' + request.RequestId;
 
-  GmailApp.sendEmail(admins.join(','), subject, body);
+  const htmlBody = buildPtoEmailHtml_({
+    eyebrow: 'Final Approval Required',
+    title: 'PTO Request Ready for Admin Review',
+    intro:
+      '<strong>' + escapeHtml_(request.EmployeeName) + '\'s</strong> ' +
+      '<strong>' + escapeHtml_(request.LeaveType) + '</strong> request was ' +
+      'approved by their supervisor and is ready for final admin approval.',
+    details: [
+      ['Employee', request.EmployeeName],
+      ['Leave type', request.LeaveType],
+      ['Dates', formattedDates],
+      ['Hours requested', request.HoursRequested],
+      ['Warnings', request.Warnings || 'None']
+    ],
+    notice:
+      'Please open the PTO app to give final approval or denial.',
+    requestId: request.RequestId
+  });
+
+  GmailApp.sendEmail(admins.join(','), subject, body, {
+    htmlBody: htmlBody
+  });
 }
+
+
+function sendEditApprovalRequestEmails_(request) {
+  const formattedDates =
+    formatPtoDate_(request.StartDate) +
+    ' to ' +
+    formatPtoDate_(request.EndDate);
+
+  if (request.SupervisorEmail) {
+    const supervisorSubject =
+      'Approved PTO request changed - supervisor review needed';
+
+    const supervisorBody =
+      request.EmployeeName +
+      ' updated a previously approved ' +
+      request.LeaveType +
+      ' request.\n\n' +
+      'Updated dates: ' + formattedDates + '\n' +
+      'Updated hours: ' + request.HoursRequested + '\n' +
+      'Reason: ' + (request.Reason || 'No reason provided') + '\n\n' +
+      'The existing approved calendar schedule remains in place until this change is approved.\n\n' +
+      'Please open the PTO app to review the change.\n\n' +
+      'Request ID:\n' + request.RequestId;
+
+    const supervisorHtmlBody = buildPtoEmailHtml_({
+      eyebrow: 'Reapproval Required',
+      title: 'Approved PTO Request Changed',
+      intro:
+        '<strong>' + escapeHtml_(request.EmployeeName) +
+        '</strong> updated a previously approved ' +
+        '<strong>' + escapeHtml_(request.LeaveType) + '</strong> request.',
+      details: [
+        ['Employee', request.EmployeeName],
+        ['Leave type', request.LeaveType],
+        ['Updated dates', formattedDates],
+        ['Updated hours', request.HoursRequested],
+        ['Reason', request.Reason || 'No reason provided']
+      ],
+      warning:
+        'The existing approved calendar schedule remains in place until this change is approved.',
+      notice:
+        'Please open the PTO app to review the change.',
+      requestId: request.RequestId
+    });
+
+    GmailApp.sendEmail(
+      request.SupervisorEmail,
+      supervisorSubject,
+      supervisorBody,
+      {
+        htmlBody: supervisorHtmlBody
+      }
+    );
+  }
+
+  const settings = getSettings_();
+  const admins = String(settings.AdminEmails || '')
+    .split(',')
+    .map(function (s) {
+      return s.trim();
+    })
+    .filter(Boolean);
+
+  if (admins.length) {
+    const adminSubject =
+      'Approved PTO request changed - admin heads-up';
+
+    const adminBody =
+      request.EmployeeName +
+      ' updated a previously approved ' +
+      request.LeaveType +
+      ' request.\n\n' +
+      'Updated dates: ' + formattedDates + '\n' +
+      'Updated hours: ' + request.HoursRequested + '\n' +
+      'Reason: ' + (request.Reason || 'No reason provided') + '\n\n' +
+      'The existing approved calendar schedule remains in place until this change finishes reapproval.\n\n' +
+      'You will receive a final approval request after supervisor review.\n\n' +
+      'Request ID:\n' + request.RequestId;
+
+    const adminHtmlBody = buildPtoEmailHtml_({
+      eyebrow: 'PTO Change Notification',
+      title: 'Approved PTO Request Changed',
+      intro:
+        '<strong>' + escapeHtml_(request.EmployeeName) +
+        '</strong> updated a previously approved ' +
+        '<strong>' + escapeHtml_(request.LeaveType) + '</strong> request.',
+      details: [
+        ['Employee', request.EmployeeName],
+        ['Leave type', request.LeaveType],
+        ['Updated dates', formattedDates],
+        ['Updated hours', request.HoursRequested],
+        ['Reason', request.Reason || 'No reason provided']
+      ],
+      warning:
+        'The existing approved calendar schedule remains in place until this change finishes reapproval.',
+      notice:
+        'You will receive a final approval request after supervisor review.',
+      requestId: request.RequestId
+    });
+
+    GmailApp.sendEmail(
+      admins.join(','),
+      adminSubject,
+      adminBody,
+      {
+        htmlBody: adminHtmlBody
+      }
+    );
+  }
+}
+
 
 function sendEmployeeEmail_(to, subject, body) {
   GmailApp.sendEmail(to, subject, body);
 }
+
+
+/*******************************
+ * Email formatting helpers
+ *******************************/
+
+/**
+ * Converts a PTO date into a readable format:
+ * Monday, July 20, 2026
+ */
+function formatPtoDate_(dateValue) {
+  if (
+    dateValue === null ||
+    dateValue === undefined ||
+    dateValue === ''
+  ) {
+    return 'Date not provided';
+  }
+
+  let date;
+
+  if (dateValue instanceof Date) {
+    date = dateValue;
+  } else {
+    date = new Date(dateValue);
+  }
+
+  if (isNaN(date.getTime())) {
+    return String(dateValue);
+  }
+
+  return Utilities.formatDate(
+    date,
+    Session.getScriptTimeZone(),
+    'EEEE, MMMM d, yyyy'
+  );
+}
+
+
+/**
+ * Builds the formatted HTML version of a PTO email.
+ */
+function buildPtoEmailHtml_(options) {
+  const detailRows = (options.details || [])
+    .map(function (detail) {
+      return (
+        '<tr>' +
+          '<td style="' +
+            'padding:10px 14px;' +
+            'border-bottom:1px solid #e5e7eb;' +
+            'font-size:13px;' +
+            'font-weight:bold;' +
+            'color:#4b5563;' +
+            'width:145px;' +
+            'vertical-align:top;' +
+          '">' +
+            escapeHtml_(detail[0]) +
+          '</td>' +
+          '<td style="' +
+            'padding:10px 14px;' +
+            'border-bottom:1px solid #e5e7eb;' +
+            'font-size:14px;' +
+            'color:#111827;' +
+            'vertical-align:top;' +
+            'word-break:break-word;' +
+          '">' +
+            formatEmailValue_(detail[1]) +
+          '</td>' +
+        '</tr>'
+      );
+    })
+    .join('');
+
+  const warningBlock = options.warning
+    ? (
+      '<div style="' +
+        'margin:22px 0 0;' +
+        'padding:14px 16px;' +
+        'background-color:#fff7ed;' +
+        'border-left:4px solid #f59e0b;' +
+        'font-size:14px;' +
+        'line-height:21px;' +
+        'color:#7c2d12;' +
+      '">' +
+        escapeHtml_(options.warning) +
+      '</div>'
+    )
+    : '';
+
+  const noticeBlock = options.notice
+    ? (
+      '<div style="' +
+        'margin:22px 0 0;' +
+        'padding:16px;' +
+        'background-color:#eff6ff;' +
+        'border:1px solid #bfdbfe;' +
+        'border-radius:6px;' +
+        'font-size:14px;' +
+        'line-height:21px;' +
+        'color:#1e3a5f;' +
+      '">' +
+        '<strong>Next step:</strong> ' +
+        escapeHtml_(options.notice) +
+      '</div>'
+    )
+    : '';
+
+  return (
+    '<!DOCTYPE html>' +
+    '<html>' +
+    '<body style="' +
+      'margin:0;' +
+      'padding:0;' +
+      'background-color:#f3f4f6;' +
+      'font-family:Arial,Helvetica,sans-serif;' +
+      'color:#111827;' +
+    '">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+        'style="width:100%;background-color:#f3f4f6;margin:0;padding:0;">' +
+        '<tr>' +
+          '<td align="center" style="padding:28px 12px;">' +
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+              'style="' +
+                'width:100%;' +
+                'max-width:640px;' +
+                'background-color:#ffffff;' +
+                'border:1px solid #d1d5db;' +
+                'border-radius:8px;' +
+                'overflow:hidden;' +
+              '">' +
+
+              '<tr>' +
+                '<td style="' +
+                  'padding:24px 28px;' +
+                  'background-color:#333f48;' +
+                '">' +
+                  '<div style="' +
+                    'font-size:11px;' +
+                    'font-weight:bold;' +
+                    'letter-spacing:1.5px;' +
+                    'text-transform:uppercase;' +
+                    'color:#efdbb2;' +
+                    'margin-bottom:8px;' +
+                  '">' +
+                    escapeHtml_(options.eyebrow || 'PTO Request') +
+                  '</div>' +
+                  '<div style="' +
+                    'font-size:24px;' +
+                    'line-height:30px;' +
+                    'font-weight:bold;' +
+                    'color:#ffffff;' +
+                  '">' +
+                    escapeHtml_(options.title || 'PTO Request') +
+                  '</div>' +
+                '</td>' +
+              '</tr>' +
+
+              '<tr>' +
+                '<td style="padding:26px 28px;">' +
+                  '<div style="' +
+                    'font-size:15px;' +
+                    'line-height:23px;' +
+                    'color:#374151;' +
+                    'margin-bottom:22px;' +
+                  '">' +
+                    options.intro +
+                  '</div>' +
+
+                  '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+                    'style="' +
+                      'width:100%;' +
+                      'border:1px solid #d1d5db;' +
+                      'border-radius:6px;' +
+                      'border-collapse:separate;' +
+                      'border-spacing:0;' +
+                      'overflow:hidden;' +
+                    '">' +
+                    detailRows +
+                  '</table>' +
+
+                  warningBlock +
+                  noticeBlock +
+
+                  '<div style="' +
+                    'margin-top:24px;' +
+                    'padding-top:18px;' +
+                    'border-top:1px solid #e5e7eb;' +
+                    'font-size:12px;' +
+                    'line-height:18px;' +
+                    'color:#6b7280;' +
+                  '">' +
+                    '<strong>Request ID</strong><br>' +
+                    '<span style="' +
+                      'font-family:Courier New,Courier,monospace;' +
+                      'color:#374151;' +
+                      'word-break:break-all;' +
+                    '">' +
+                      escapeHtml_(options.requestId || '') +
+                    '</span>' +
+                  '</div>' +
+                '</td>' +
+              '</tr>' +
+
+              '<tr>' +
+                '<td style="' +
+                  'padding:16px 28px;' +
+                  'background-color:#f9fafb;' +
+                  'border-top:1px solid #e5e7eb;' +
+                  'font-size:11px;' +
+                  'line-height:17px;' +
+                  'color:#6b7280;' +
+                '">' +
+                  'This is an automated PTO notification.' +
+                '</td>' +
+              '</tr>' +
+
+            '</table>' +
+          '</td>' +
+        '</tr>' +
+      '</table>' +
+    '</body>' +
+    '</html>'
+  );
+}
+
+
+/**
+ * Safely formats values placed inside the HTML detail table.
+ */
+function formatEmailValue_(value) {
+  const safeValue =
+    value === null ||
+    value === undefined ||
+    value === ''
+      ? 'Not provided'
+      : String(value);
+
+  return escapeHtml_(safeValue).replace(/\r?\n/g, '<br>');
+}
+
+
+/**
+ * Prevents request data from breaking the email HTML.
+ */
+function escapeHtml_(value) {
+  return String(
+    value === null || value === undefined
+      ? ''
+      : value
+  )
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+
 
 /*******************************
  * Data Access
@@ -943,6 +1622,7 @@ function getEmployees_() {
 }
 
 function getRequests_() {
+  ensureRequestSheetColumns_();
   return getSheetObjects_(SHEETS.REQUESTS);
 }
 
@@ -967,6 +1647,10 @@ function getRequestById_(requestId) {
   return getRequests_().find(function (r) {
     return String(r.RequestId) === String(requestId);
   });
+}
+
+function isEditRequest_(request) {
+  return lower_(request.ChangeType) === 'edit';
 }
 
 function isAdmin_(email) {
@@ -1032,6 +1716,33 @@ function getSheetObjects_(sheetName) {
 
       return obj;
     });
+}
+
+function ensureRequestSheetColumns_() {
+  ensureSheetColumns_(SHEETS.REQUESTS, REQUEST_METADATA_COLUMNS);
+}
+
+function ensureSheetColumns_(sheetName, requiredHeaders) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(sheetName);
+
+  if (!sh) {
+    throw new Error('Missing sheet: ' + sheetName);
+  }
+
+  const lastColumn = Math.max(sh.getLastColumn(), 1);
+  const headers = sh.getRange(1, 1, 1, lastColumn).getValues()[0]
+    .map(function (header) {
+      return String(header).trim();
+    });
+
+  requiredHeaders.forEach(function (header) {
+    if (headers.indexOf(header) >= 0) {
+      return;
+    }
+
+    sh.getRange(1, headers.length + 1).setValue(header);
+    headers.push(header);
+  });
 }
 
 function appendObject_(sheetName, obj) {
