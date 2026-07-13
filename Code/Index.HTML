@@ -259,6 +259,8 @@ function render(data) {
     renderRequests('My Requests', data.myRequests, false, false) +
     (data.isSupervisor ? renderRequests('Supervisor Approval Dashboard', data.supervisorRequests, false, true) : '') +
     (data.isAdmin ? renderAdminDashboard(data.allRequests) : '');
+
+  initializeHoursRecommendationWidgets();
 }
 
 function renderBalances(b) {
@@ -280,9 +282,9 @@ function renderBalances(b) {
         '</div>' +
         '<div class="card">' +
           '<h3>Serious Illness</h3>' +
-          '<p><strong>Allowance:</strong> No cap</p>' +
+          '<p><strong>Allowance:</strong> ' + escapeHtml(b.serious.allowanceHours) + ' hrs</p>' +
           '<p><strong>Used:</strong> ' + escapeHtml(b.serious.usedHours) + ' hrs</p>' +
-          '<p><strong>Available:</strong> No cap</p>' +
+          '<p><strong>Available:</strong> ' + escapeHtml(b.serious.availableHours) + ' hrs</p>' +
         '</div>' +
       '</div>' +
     '</div>'
@@ -305,17 +307,19 @@ function renderRequestForm() {
       '<div class="grid">' +
         '<div>' +
           '<label>Start Date</label>' +
-          '<input id="startDate" type="date">' +
+          '<input id="startDate" type="date" onchange="refreshHoursRecommendation()">' +
         '</div>' +
         '<div>' +
           '<label>End Date</label>' +
-          '<input id="endDate" type="date">' +
+          '<input id="endDate" type="date" onchange="refreshHoursRecommendation()">' +
         '</div>' +
         '<div>' +
           '<label>Hours Requested</label>' +
           '<input id="hoursRequested" type="number" step="0.25" min="0">' +
         '</div>' +
       '</div>' +
+      '<p id="hoursRecommendation" class="muted"></p>' +
+      '<button type="button" class="light" onclick="applyHoursRecommendation()">Use Recommended Hours</button>' +
       '<label>Reason / Notes</label>' +
       '<textarea id="reason"></textarea>' +
       '<button onclick="submitRequest()">Submit Request</button>' +
@@ -352,11 +356,19 @@ function filterAdminRequests(requests) {
   var filtered = [];
 
   for (i = 0; i < requests.length; i++) {
-    if (ADMIN_FILTER === 'approved' && requests[i].Status === 'Approved') {
+    if (
+      ADMIN_FILTER === 'approved' &&
+      (requests[i].Status === 'Approved' || requests[i].Status === 'Edit Approved')
+    ) {
       filtered.push(requests[i]);
     } else if (
       ADMIN_FILTER === 'denied' &&
-      (requests[i].Status === 'Denied by Supervisor' || requests[i].Status === 'Denied by Admin')
+      (
+        requests[i].Status === 'Denied by Supervisor' ||
+        requests[i].Status === 'Denied by Admin' ||
+        requests[i].Status === 'Edit Denied by Supervisor' ||
+        requests[i].Status === 'Edit Denied by Admin'
+      )
     ) {
       filtered.push(requests[i]);
     } else if (ADMIN_FILTER === 'all') {
@@ -364,7 +376,9 @@ function filterAdminRequests(requests) {
     } else if (
       ADMIN_FILTER === 'pending' &&
       (requests[i].Status === 'Pending Supervisor Approval' ||
-        requests[i].Status === 'Pending Admin Final Approval')
+        requests[i].Status === 'Pending Admin Final Approval' ||
+        requests[i].Status === 'Pending Supervisor Reapproval' ||
+        requests[i].Status === 'Pending Admin Reapproval')
     ) {
       filtered.push(requests[i]);
     }
@@ -438,23 +452,71 @@ function renderActions(request, adminMode, supervisorMode) {
     return renderSupervisorButtons(request);
   }
 
-  return renderStatusHint(request);
+  return renderEmployeeButtons(request);
+}
+
+function renderEmployeeButtons(request) {
+  var actions = '';
+
+  if (canEmployeeEditRequest(request)) {
+    actions += '<button class="secondary" onclick="toggleEditCard(\'' + escapeAttr(request.RequestId) + '\')">Edit</button>';
+  }
+
+  actions += '<div class="muted">' + escapeHtml(getStatusHintText(request)) + '</div>';
+  return actions;
 }
 
 function renderStatusHint(request) {
+  return '<span class="muted">' + escapeHtml(getStatusHintText(request)) + '</span>';
+}
+
+function getStatusHintText(request) {
   if (request.Status === 'Pending Supervisor Approval') {
-    return '<span class="muted">Waiting on supervisor</span>';
+    return 'Waiting on supervisor';
   }
 
   if (request.Status === 'Pending Admin Final Approval') {
-    return '<span class="muted">Waiting on final admin approval</span>';
+    return 'Waiting on final admin approval';
   }
 
-  return '';
+  if (request.Status === 'Pending Supervisor Reapproval') {
+    return 'Change waiting on supervisor reapproval';
+  }
+
+  if (request.Status === 'Pending Admin Reapproval') {
+    return 'Change waiting on final admin approval';
+  }
+
+  if (request.Status === 'Approved') {
+    return 'Approved';
+  }
+
+  if (request.Status === 'Edit Approved') {
+    return 'Approved change';
+  }
+
+  if (request.Status === 'Edit Denied by Supervisor' || request.Status === 'Edit Denied by Admin') {
+    return 'Change denied';
+  }
+
+  return request.Status || '';
+}
+
+function canEmployeeEditRequest(request) {
+  return (
+    request.Status === 'Pending Supervisor Approval' ||
+    request.Status === 'Pending Admin Final Approval' ||
+    request.Status === 'Approved' ||
+    request.Status === 'Pending Supervisor Reapproval' ||
+    request.Status === 'Pending Admin Reapproval'
+  );
 }
 
 function renderSupervisorButtons(request) {
-  if (request.Status !== 'Pending Supervisor Approval') {
+  if (
+    request.Status !== 'Pending Supervisor Approval' &&
+    request.Status !== 'Pending Supervisor Reapproval'
+  ) {
     return '';
   }
 
@@ -470,7 +532,12 @@ function renderSupervisorButtons(request) {
 }
 
 function renderAdminButtons(request) {
-  if (request.Status !== 'Pending Admin Final Approval' && request.Status !== 'Pending Supervisor Approval') {
+  if (
+    request.Status !== 'Pending Admin Final Approval' &&
+    request.Status !== 'Pending Supervisor Approval' &&
+    request.Status !== 'Pending Admin Reapproval' &&
+    request.Status !== 'Pending Supervisor Reapproval'
+  ) {
     return '';
   }
 
@@ -486,27 +553,35 @@ function renderAdminButtons(request) {
 }
 
 function renderEditCard(request) {
+  var isApproved = request.Status === 'Approved';
+  var saveLabel = isApproved ? 'Submit Change For Reapproval' : 'Save Changes';
+  var helperText = isApproved
+    ? 'Changes to an approved request will create a reapproval request. The current calendar schedule will stay in place until the updated request is approved.'
+    : 'Changes made here update the request without sending a new email while it is still waiting for approval.';
+
   return (
     '<div class="card edit-card">' +
-      '<h3>Edit Request Before Approval</h3>' +
-      '<p class="muted">Changes made here update the pending request before approval. Approved requests should be changed through a separate correction process.</p>' +
+      '<h3>Edit Request</h3>' +
+      '<p class="muted">' + escapeHtml(helperText) + '</p>' +
       '<div class="grid">' +
         '<div>' +
           '<label>Start Date</label>' +
-          '<input id="edit-start-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.StartDate)) + '">' +
+          '<input id="edit-start-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.StartDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
         '</div>' +
         '<div>' +
           '<label>End Date</label>' +
-          '<input id="edit-end-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.EndDate)) + '">' +
+          '<input id="edit-end-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.EndDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
         '</div>' +
         '<div>' +
           '<label>Hours Requested</label>' +
           '<input id="edit-hours-' + escapeAttr(request.RequestId) + '" type="number" step="0.25" min="0" value="' + escapeAttr(request.HoursRequested || '') + '">' +
         '</div>' +
       '</div>' +
+      '<p id="edit-recommend-' + escapeAttr(request.RequestId) + '" class="muted"></p>' +
+      '<button type="button" class="light" onclick="applyEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">Use Recommended Hours</button>' +
       '<label>Reason / Notes</label>' +
       '<textarea id="edit-reason-' + escapeAttr(request.RequestId) + '">' + escapeHtml(request.Reason || '') + '</textarea>' +
-      '<button onclick="saveRequestEdit(\'' + escapeAttr(request.RequestId) + '\')">Save Changes</button>' +
+      '<button onclick="saveRequestEdit(\'' + escapeAttr(request.RequestId) + '\')">' + saveLabel + '</button>' +
       '<button class="light" onclick="toggleEditCard(\'' + escapeAttr(request.RequestId) + '\')">Cancel</button>' +
       '<p id="edit-result-' + escapeAttr(request.RequestId) + '" class="muted"></p>' +
     '</div>'
@@ -518,6 +593,7 @@ function toggleEditCard(requestId) {
   if (row) {
     if (row.className.indexOf('hidden') >= 0) {
       row.className = row.className.replace('hidden', '').trim();
+      refreshEditHoursRecommendation(requestId);
     } else {
       row.className += ' hidden';
     }
@@ -547,6 +623,145 @@ function saveRequestEdit(requestId) {
       hoursRequested: hoursRequested,
       reason: reason
     });
+}
+
+function initializeHoursRecommendationWidgets() {
+  var editRows;
+  var i;
+
+  refreshHoursRecommendation();
+  editRows = document.querySelectorAll('[id^="edit-row-"]');
+
+  for (i = 0; i < editRows.length; i++) {
+    refreshEditHoursRecommendation(editRows[i].id.replace('edit-row-', ''));
+  }
+}
+
+function refreshHoursRecommendation() {
+  refreshRecommendationForFields('startDate', 'endDate', 'hoursRequested', 'hoursRecommendation');
+}
+
+function refreshEditHoursRecommendation(requestId) {
+  refreshRecommendationForFields(
+    'edit-start-' + requestId,
+    'edit-end-' + requestId,
+    'edit-hours-' + requestId,
+    'edit-recommend-' + requestId
+  );
+}
+
+function applyHoursRecommendation() {
+  applyRecommendationForField('startDate', 'endDate', 'hoursRequested');
+  refreshHoursRecommendation();
+}
+
+function applyEditHoursRecommendation(requestId) {
+  applyRecommendationForField(
+    'edit-start-' + requestId,
+    'edit-end-' + requestId,
+    'edit-hours-' + requestId
+  );
+  refreshEditHoursRecommendation(requestId);
+}
+
+function refreshRecommendationForFields(startId, endId, hoursId, messageId) {
+  var startValue = document.getElementById(startId);
+  var endValue = document.getElementById(endId);
+  var hoursField = document.getElementById(hoursId);
+  var message = document.getElementById(messageId);
+  var suggestion;
+
+  if (!startValue || !endValue || !hoursField || !message) {
+    return;
+  }
+
+  suggestion = getHourSuggestion(startValue.value, endValue.value);
+
+  if (!suggestion) {
+    message.innerText = '';
+    return;
+  }
+
+  message.innerText =
+    'Recommended hours: ' + suggestion.hours +
+    ' (' + suggestion.days +
+    ' day' + (suggestion.days === 1 ? '' : 's') +
+    ' at 8 hours, excluding Fridays and Saturdays).';
+
+  if (shouldAutoApplySuggestion(hoursField, suggestion.hours)) {
+    hoursField.value = suggestion.hours;
+  }
+
+  hoursField.setAttribute('data-last-suggested', String(suggestion.hours));
+}
+
+function applyRecommendationForField(startId, endId, hoursId) {
+  var hoursField = document.getElementById(hoursId);
+  var startValue = document.getElementById(startId);
+  var endValue = document.getElementById(endId);
+  var suggestion;
+
+  if (!hoursField || !startValue || !endValue) {
+    return;
+  }
+
+  suggestion = getHourSuggestion(startValue.value, endValue.value);
+
+  if (!suggestion) {
+    return;
+  }
+
+  hoursField.value = suggestion.hours;
+  hoursField.setAttribute('data-last-suggested', String(suggestion.hours));
+}
+
+function shouldAutoApplySuggestion(hoursField, suggestedHours) {
+  var currentValue = String(hoursField.value || '').trim();
+  var previousSuggested = String(hoursField.getAttribute('data-last-suggested') || '').trim();
+
+  return !currentValue || currentValue === '0' || currentValue === previousSuggested;
+}
+
+function getHourSuggestion(startDate, endDate) {
+  var start = parseDateInput(startDate);
+  var end = parseDateInput(endDate);
+  var cursor;
+  var days = 0;
+
+  if (!start || !end || end < start) {
+    return null;
+  }
+
+  cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+
+  while (cursor <= end) {
+    if (cursor.getDay() !== 5 && cursor.getDay() !== 6) {
+      days += 1;
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return {
+    days: days,
+    hours: days * 8
+  };
+}
+
+function parseDateInput(value) {
+  var parts;
+
+  if (!value) {
+    return null;
+  }
+
+  parts = String(value).split('-');
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
 }
 
 function submitRequest() {
