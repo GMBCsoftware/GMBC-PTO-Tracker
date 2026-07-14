@@ -417,7 +417,7 @@ function renderRequestsTable(requests, adminMode, supervisorMode) {
       '<tr>' +
         '<td><strong>' + escapeHtml(requests[i].EmployeeName || '') + '</strong><br><span class="muted">' + escapeHtml(requests[i].EmployeeEmail || '') + '</span></td>' +
         '<td>' + escapeHtml(requests[i].LeaveType || '') + '</td>' +
-        '<td>' + escapeHtml(formatDate(requests[i].StartDate)) + ' to ' + escapeHtml(formatDate(requests[i].EndDate)) + '</td>' +
+        '<td>' + escapeHtml(formatDisplayDate(requests[i].StartDate)) + ' to ' + escapeHtml(formatDisplayDate(requests[i].EndDate)) + '</td>' +
         '<td>' + escapeHtml(requests[i].HoursRequested || '') + '</td>' +
         '<td><span class="pill">' + escapeHtml(requests[i].Status || '') + '</span></td>' +
         '<td>' + warningsHtml + '</td>' +
@@ -569,11 +569,11 @@ function renderEditCard(request) {
       '<div class="grid">' +
         '<div>' +
           '<label>Start Date</label>' +
-          '<input id="edit-start-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.StartDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
+          '<input id="edit-start-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDateInputValue(request.StartDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
         '</div>' +
         '<div>' +
           '<label>End Date</label>' +
-          '<input id="edit-end-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDate(request.EndDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
+          '<input id="edit-end-' + escapeAttr(request.RequestId) + '" type="date" value="' + escapeAttr(formatDateInputValue(request.EndDate)) + '" onchange="refreshEditHoursRecommendation(\'' + escapeAttr(request.RequestId) + '\')">' +
         '</div>' +
         '<div>' +
           '<label>Hours Requested</label>' +
@@ -688,8 +688,8 @@ function refreshRecommendationForFields(startId, endId, hoursId, messageId) {
   message.innerText =
     'Recommended hours: ' + suggestion.hours +
     ' (' + suggestion.days +
-    ' day' + (suggestion.days === 1 ? '' : 's') +
-    ' at 8 hours, excluding Fridays and Saturdays).';
+    ' workday' + (suggestion.days === 1 ? '' : 's') +
+    ' at 8 hours based on the ' + suggestion.pattern + ' schedule).';
 
   if (shouldAutoApplySuggestion(hoursField, suggestion.hours)) {
     hoursField.value = suggestion.hours;
@@ -730,6 +730,7 @@ function getHourSuggestion(startDate, endDate) {
   var end = parseDateInput(endDate);
   var cursor;
   var days = 0;
+  var workingDayIndexes = getWorkingDayIndexes();
 
   if (!start || !end || end < start) {
     return null;
@@ -738,7 +739,7 @@ function getHourSuggestion(startDate, endDate) {
   cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
 
   while (cursor <= end) {
-    if (cursor.getDay() !== 5 && cursor.getDay() !== 6) {
+    if (workingDayIndexes.indexOf(cursor.getDay()) >= 0) {
       days += 1;
     }
 
@@ -747,8 +748,40 @@ function getHourSuggestion(startDate, endDate) {
 
   return {
     days: days,
-    hours: days * 8
+    hours: days * 8,
+    pattern: getSchedulePatternLabel()
   };
+}
+
+function getWorkingDayIndexes() {
+  var schedule = DATA && DATA.recommendedSchedule;
+  var rawIndexes = schedule && schedule.workingDayIndexes;
+  var indexes = [];
+  var i;
+
+  if (!rawIndexes || !rawIndexes.length) {
+    return [0, 1, 2, 3, 4];
+  }
+
+  for (i = 0; i < rawIndexes.length; i++) {
+    indexes.push(Number(rawIndexes[i]));
+  }
+
+  return indexes;
+}
+
+function getSchedulePatternLabel() {
+  var schedule = DATA && DATA.recommendedSchedule;
+
+  if (!schedule || !schedule.pattern) {
+    return 'SUN-THUR';
+  }
+
+  if (schedule.label) {
+    return schedule.label + ' (' + schedule.pattern + ')';
+  }
+
+  return schedule.pattern;
 }
 
 function parseDateInput(value) {
@@ -817,7 +850,7 @@ function adminDecision(requestId, decision) {
     .adminDecision(requestId, decision, note, overrideBalance);
 }
 
-function formatDate(value) {
+function formatDateInputValue(value) {
   if (!value) {
     return '';
   }
@@ -827,6 +860,30 @@ function formatDate(value) {
   }
 
   return String(value).substring(0, 10);
+}
+
+function formatDisplayDate(value) {
+  var date;
+
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+      return Number(value.substring(5, 7)) + '/' + Number(value.substring(8, 10)) + '/' + value.substring(0, 4);
+    }
+
+    date = new Date(value);
+  } else {
+    date = new Date(value);
+  }
+
+  if (isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
 }
 
 function getReturnUrl() {
