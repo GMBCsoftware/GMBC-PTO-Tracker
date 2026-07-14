@@ -38,6 +38,10 @@ const LEAVE_TYPES = {
   OTHER: 'Other'
 };
 
+// Optional override for the PTO web app link used in email buttons.
+// Leave blank to fall back to the deployed Script URL automatically.
+const PTO_EMAIL_BUTTON_URL = '';
+
 /*******************************
  * Web App
  *******************************/
@@ -145,6 +149,7 @@ function getBootstrapData() {
     user: user,
     webAppUrl: getWebAppUrl_(),
     employee: employee,
+    recommendedSchedule: getEmployeeScheduleConfig_(employee),
     isAdmin: isAdminUser,
     isSupervisor: isSupervisorUser,
     balances: balances,
@@ -357,7 +362,25 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
       (isEditRequest
         ? ' change was denied by your supervisor. Your previously approved schedule remains unchanged.'
         : ' was denied by your supervisor.') +
-      (note ? '\n\nNote: ' + note : '')
+      (note ? '\n\nNote: ' + note : ''),
+      {
+        eyebrow: 'Supervisor Decision',
+        title: isEditRequest
+          ? 'Time Off Change Denied'
+          : 'Time Off Request Denied',
+        intro: 'Your <strong>' + escapeHtml_(request.LeaveType) + '</strong> request was denied by your supervisor.',
+        details: [
+          ['Leave type', request.LeaveType],
+          ['Dates', formatPtoDateRange_(request.StartDate, request.EndDate)],
+          ['Hours requested', request.HoursRequested],
+          ['Note', note || 'No note provided']
+        ],
+        warning: isEditRequest
+          ? 'Your previously approved calendar schedule remains unchanged.'
+          : '',
+        notice: 'Open the PTO app if you need to review or submit another request.',
+        requestId: request.RequestId
+      }
     );
   }
 
@@ -475,7 +498,22 @@ function adminDecision(requestId, decision, note, overrideBalance) {
       'Your ' + request.LeaveType + ' request has received final approval.\n\n' +
       'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
       'Hours: ' + request.HoursRequested + '\n\n' +
-      (warnings.length ? 'Warning(s): ' + warnings.join(' ') : '')
+      (warnings.length ? 'Warning(s): ' + warnings.join(' ') : ''),
+      {
+        eyebrow: 'Final Approval',
+        title: isEditRequest
+          ? 'Time Off Change Approved'
+          : 'Time Off Request Approved',
+        intro: 'Your <strong>' + escapeHtml_(request.LeaveType) + '</strong> request has received final approval.',
+        details: [
+          ['Leave type', request.LeaveType],
+          ['Dates', formatPtoDateRange_(request.StartDate, request.EndDate)],
+          ['Hours requested', request.HoursRequested],
+          ['Warnings', warnings.length ? warnings.join(' ') : 'None']
+        ],
+        notice: 'Open the PTO app any time to review your request history.',
+        requestId: request.RequestId
+      }
     );
   } else {
     sendEmployeeEmail_(
@@ -487,7 +525,25 @@ function adminDecision(requestId, decision, note, overrideBalance) {
       (isEditRequest
         ? ' change was denied by admin. Your previously approved schedule remains unchanged.'
         : ' was denied by admin.') +
-      (note ? '\n\nNote: ' + note : '')
+      (note ? '\n\nNote: ' + note : ''),
+      {
+        eyebrow: 'Admin Decision',
+        title: isEditRequest
+          ? 'Time Off Change Denied'
+          : 'Time Off Request Denied',
+        intro: 'Your <strong>' + escapeHtml_(request.LeaveType) + '</strong> request was denied by admin.',
+        details: [
+          ['Leave type', request.LeaveType],
+          ['Dates', formatPtoDateRange_(request.StartDate, request.EndDate)],
+          ['Hours requested', request.HoursRequested],
+          ['Note', note || 'No note provided']
+        ],
+        warning: isEditRequest
+          ? 'Your previously approved calendar schedule remains unchanged.'
+          : '',
+        notice: 'Open the PTO app if you need to review or submit another request.',
+        requestId: request.RequestId
+      }
     );
   }
 
@@ -903,6 +959,111 @@ function validateRequest_(
   }
 
   return warnings;
+}
+
+function getEmployeeScheduleConfig_(employee) {
+  const settings = getSettings_();
+  const employmentType = String(employee.EmploymentType || '').trim();
+  const configuredPattern = employmentType && settings[employmentType]
+    ? String(settings[employmentType]).trim()
+    : '';
+  const fallbackPattern = String(settings['Full-Time'] || '').trim();
+  const schedulePattern = configuredPattern || fallbackPattern || 'SUN-THUR';
+
+  return parseWorkSchedulePattern_(schedulePattern, employmentType || 'Default');
+}
+
+function parseWorkSchedulePattern_(pattern, label) {
+  const normalizedPattern = String(pattern || '').trim().toUpperCase();
+  const dayTokens = ['SUN', 'MON', 'TUE', 'WED', 'THUR', 'FRI', 'SAT'];
+  const dayNames = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
+  ];
+  const indexesByToken = {
+    SUN: 0,
+    MON: 1,
+    TUE: 2,
+    WED: 3,
+    THUR: 4,
+    THU: 4,
+    FRI: 5,
+    SAT: 6
+  };
+  const workingDayIndexes = [];
+  const parts = normalizedPattern
+    ? normalizedPattern.split(',').map(function (part) {
+      return part.trim();
+    }).filter(Boolean)
+    : [];
+
+  if (!parts.length) {
+    return {
+      label: label,
+      pattern: 'SUN-THUR',
+      workingDayIndexes: [0, 1, 2, 3, 4],
+      workingDayNames: dayNames.slice(0, 5)
+    };
+  }
+
+  parts.forEach(function (part) {
+    if (part.indexOf('-') >= 0) {
+      const rangeParts = part.split('-').map(function (piece) {
+        return piece.trim();
+      });
+      const startIndex = indexesByToken[rangeParts[0]];
+      const endIndex = indexesByToken[rangeParts[1]];
+
+      if (startIndex === undefined || endIndex === undefined) {
+        return;
+      }
+
+      let cursor = startIndex;
+
+      while (workingDayIndexes.indexOf(cursor) < 0) {
+        workingDayIndexes.push(cursor);
+
+        if (cursor === endIndex) {
+          break;
+        }
+
+        cursor = (cursor + 1) % dayTokens.length;
+      }
+
+      return;
+    }
+
+    if (indexesByToken[part] !== undefined && workingDayIndexes.indexOf(indexesByToken[part]) < 0) {
+      workingDayIndexes.push(indexesByToken[part]);
+    }
+  });
+
+  const normalizedIndexes = workingDayIndexes.slice().sort(function (a, b) {
+    return a - b;
+  });
+
+  if (!normalizedIndexes.length) {
+    return {
+      label: label,
+      pattern: 'SUN-THUR',
+      workingDayIndexes: [0, 1, 2, 3, 4],
+      workingDayNames: dayNames.slice(0, 5)
+    };
+  }
+
+  return {
+    label: label,
+    pattern: normalizedPattern || 'SUN-THUR',
+    workingDayIndexes: normalizedIndexes,
+    workingDayNames: normalizedIndexes.map(function (index) {
+      return dayNames[index];
+    })
+  };
 }
 
 /*******************************
@@ -1454,8 +1615,16 @@ function sendEditApprovalRequestEmails_(request) {
   }
 }
 
-function sendEmployeeEmail_(to, subject, body) {
-  GmailApp.sendEmail(to, subject, body);
+function sendEmployeeEmail_(to, subject, body, htmlOptions) {
+  if (!htmlOptions) {
+    GmailApp.sendEmail(to, subject, body);
+    return;
+  }
+
+  const htmlBody = buildPtoEmailHtml_(htmlOptions);
+  GmailApp.sendEmail(to, subject, body, {
+    htmlBody: htmlBody
+  });
 }
 
 /*******************************
@@ -1494,10 +1663,52 @@ function formatPtoDate_(dateValue) {
   );
 }
 
+function formatPtoShortDate_(dateValue) {
+  if (
+    dateValue === null ||
+    dateValue === undefined ||
+    dateValue === ''
+  ) {
+    return 'Date not provided';
+  }
+
+  let date;
+
+  if (dateValue instanceof Date) {
+    date = dateValue;
+  } else {
+    date = new Date(dateValue);
+  }
+
+  if (isNaN(date.getTime())) {
+    return String(dateValue);
+  }
+
+  return Utilities.formatDate(
+    date,
+    Session.getScriptTimeZone(),
+    'M/d/yyyy'
+  );
+}
+
+function formatPtoDateRange_(startDate, endDate) {
+  return formatPtoShortDate_(startDate) + ' to ' + formatPtoShortDate_(endDate);
+}
+
+function getPtoEmailActionUrl_() {
+  if (PTO_EMAIL_BUTTON_URL) {
+    return PTO_EMAIL_BUTTON_URL;
+  }
+
+  return getWebAppUrl_();
+}
+
 /**
  * Builds the formatted HTML version of a PTO email.
  */
 function buildPtoEmailHtml_(options) {
+  const actionUrl = options.actionUrl || getPtoEmailActionUrl_();
+  const actionLabel = options.actionLabel || 'Open PTO App';
   const detailRows = (options.details || [])
     .map(function (detail) {
       return (
@@ -1558,6 +1769,25 @@ function buildPtoEmailHtml_(options) {
       '">' +
         '<strong>Next step:</strong> ' +
         escapeHtml_(options.notice) +
+      '</div>'
+    )
+    : '';
+
+  const actionBlock = actionUrl
+    ? (
+      '<div style="margin:22px 0 0;">' +
+        '<a href="' + escapeHtml_(actionUrl) + '" style="' +
+          'display:inline-block;' +
+          'background-color:#85431e;' +
+          'color:#ffffff;' +
+          'text-decoration:none;' +
+          'padding:12px 18px;' +
+          'border-radius:6px;' +
+          'font-size:14px;' +
+          'font-weight:bold;' +
+        '">' +
+          escapeHtml_(actionLabel) +
+        '</a>' +
       '</div>'
     )
     : '';
@@ -1633,6 +1863,7 @@ function buildPtoEmailHtml_(options) {
                   '</table>' +
                   warningBlock +
                   noticeBlock +
+                  actionBlock +
                   '<div style="' +
                     'margin-top:24px;' +
                     'padding-top:18px;' +
