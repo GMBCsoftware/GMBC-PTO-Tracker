@@ -465,37 +465,31 @@ function adminDecision(requestId, decision, note, overrideBalance) {
       warnings: warnings
     })
   );
-  
-if (approved) {
-  sendEmployeeEmail_(
-    request.EmployeeEmail,
-    isEditRequest
-      ? 'Time off request change approved'
-      : 'Time off request approved',
-    'Your ' + request.LeaveType +
-    ' request has received final approval.\n\n' +
-    'Dates: ' + formattedDateRange + '\n' +
-    'Hours: ' + request.HoursRequested +
-    (warnings.length
-      ? '\n\nWarning(s): ' + warnings.join(' ')
-      : '')
-  );
-} else {
-  sendEmployeeEmail_(
-    request.EmployeeEmail,
-    isEditRequest
-      ? 'Time off request change denied'
-      : 'Time off request denied',
-    'Your ' + request.LeaveType +
-    ' request from ' + formattedDateRange +
-    (isEditRequest
-      ? ' was denied by admin. Your previously approved schedule remains unchanged.'
-      : ' was denied by admin.') +
-    (note
-      ? '\n\nNote: ' + note
-      : '')
-  );
-}
+
+  if (approved) {
+    sendEmployeeEmail_(
+      request.EmployeeEmail,
+      isEditRequest
+        ? 'Time off request change approved'
+        : 'Time off request approved',
+      'Your ' + request.LeaveType + ' request has received final approval.\n\n' +
+      'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
+      'Hours: ' + request.HoursRequested + '\n\n' +
+      (warnings.length ? 'Warning(s): ' + warnings.join(' ') : '')
+    );
+  } else {
+    sendEmployeeEmail_(
+      request.EmployeeEmail,
+      isEditRequest
+        ? 'Time off request change denied'
+        : 'Time off request denied',
+      'Your ' + request.LeaveType + ' request from ' + request.StartDate + ' to ' + request.EndDate +
+      (isEditRequest
+        ? ' change was denied by admin. Your previously approved schedule remains unchanged.'
+        : ' was denied by admin.') +
+      (note ? '\n\nNote: ' + note : '')
+    );
+  }
 
   return {
     ok: true,
@@ -692,55 +686,80 @@ function calculateBalances_(employee, requests) {
   const annualAllowance = getAnnualLeaveAllowanceHours_(employee);
   const personalAllowance = getPersonalLeaveAllowanceHours_(employee);
   const seriousAllowance = getSeriousLeaveAllowanceHours_(employee);
+  const activeRequests = getCanonicalBalanceRequests_(requests);
 
-  const approvedThisCycle = getApprovedRequestsInCurrentAnniversaryCycle_(
+  const approvedStartedThisCycle = getApprovedRequestsInCurrentAnniversaryCycle_(
     employee,
-    requests
+    activeRequests
   );
 
-  const annualUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.ANNUAL);
-  const personalUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.PERSONAL);
-  const seriousUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.SERIOUS);
-  const bereavementUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.BEREAVEMENT);
-  const unpaidUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.UNPAID);
-  const otherUsed = sumHours_(approvedThisCycle, LEAVE_TYPES.OTHER);
+  const requestedUpcomingThisCycle = getUpcomingRequestedRequestsInCurrentAnniversaryCycle_(
+    employee,
+    activeRequests
+  );
+
+  const annualUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.ANNUAL);
+  const personalUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.PERSONAL);
+  const seriousUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.SERIOUS);
+  const bereavementUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.BEREAVEMENT);
+  const unpaidUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.UNPAID);
+  const otherUsed = sumHours_(approvedStartedThisCycle, LEAVE_TYPES.OTHER);
+
+  const annualRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.ANNUAL);
+  const personalRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.PERSONAL);
+  const seriousRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.SERIOUS);
+  const bereavementRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.BEREAVEMENT);
+  const unpaidRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.UNPAID);
+  const otherRequested = sumHours_(requestedUpcomingThisCycle, LEAVE_TYPES.OTHER);
 
   return {
     annual: {
       label: LEAVE_TYPES.ANNUAL,
       allowanceHours: annualAllowance,
       usedHours: annualUsed,
-      availableHours: annualAllowance - annualUsed
+      requestedHours: annualRequested,
+      availableHours: annualAllowance - annualUsed,
+      remainingAfterRequestedHours: annualAllowance - annualUsed - annualRequested
     },
     personal: {
       label: LEAVE_TYPES.PERSONAL,
       allowanceHours: personalAllowance,
       usedHours: personalUsed,
-      availableHours: personalAllowance - personalUsed
+      requestedHours: personalRequested,
+      availableHours: personalAllowance - personalUsed,
+      remainingAfterRequestedHours: personalAllowance - personalUsed - personalRequested
     },
     serious: {
       label: LEAVE_TYPES.SERIOUS,
       allowanceHours: seriousAllowance,
       usedHours: seriousUsed,
-      availableHours: seriousAllowance - seriousUsed
+      requestedHours: seriousRequested,
+      availableHours: seriousAllowance - seriousUsed,
+      remainingAfterRequestedHours: seriousAllowance - seriousUsed - seriousRequested
     },
     bereavement: {
       label: LEAVE_TYPES.BEREAVEMENT,
       allowanceHours: 'Manual review',
       usedHours: bereavementUsed,
-      availableHours: 'Manual review'
+      requestedHours: bereavementRequested,
+      availableHours: 'Manual review',
+      remainingAfterRequestedHours: 'Manual review'
     },
     unpaid: {
       label: LEAVE_TYPES.UNPAID,
       allowanceHours: 'Manual review',
       usedHours: unpaidUsed,
-      availableHours: 'Manual review'
+      requestedHours: unpaidRequested,
+      availableHours: 'Manual review',
+      remainingAfterRequestedHours: 'Manual review'
     },
     other: {
       label: LEAVE_TYPES.OTHER,
       allowanceHours: 'Manual review',
       usedHours: otherUsed,
-      availableHours: 'Manual review'
+      requestedHours: otherRequested,
+      availableHours: 'Manual review',
+      remainingAfterRequestedHours: 'Manual review'
     }
   };
 }
@@ -800,7 +819,7 @@ function validateRequest_(
   }
 
   if (leaveType === LEAVE_TYPES.ANNUAL) {
-    const available = Number(balances.annual.availableHours);
+    const available = Number(balances.annual.remainingAfterRequestedHours);
 
     if (hoursRequested > available) {
       warnings.push(
@@ -834,7 +853,7 @@ function validateRequest_(
   }
 
   if (leaveType === LEAVE_TYPES.PERSONAL) {
-    const available = Number(balances.personal.availableHours);
+    const available = Number(balances.personal.remainingAfterRequestedHours);
 
     if (hoursRequested > available) {
       warnings.push(
@@ -856,7 +875,7 @@ function validateRequest_(
   }
 
   if (leaveType === LEAVE_TYPES.SERIOUS) {
-    const available = Number(balances.serious.availableHours);
+    const available = Number(balances.serious.remainingAfterRequestedHours);
 
     if (hoursRequested > available) {
       warnings.push(
@@ -949,9 +968,10 @@ function getCurrentAnniversaryStart_(employee) {
 
 function getApprovedRequestsInCurrentAnniversaryCycle_(employee, requests) {
   const cycleStart = getCurrentAnniversaryStart_(employee);
+  const today = startOfToday_();
 
   return requests.filter(function (r) {
-    if (r.Status !== STATUS.APPROVED) {
+    if (!isApprovedBalanceStatus_(r.Status)) {
       return false;
     }
 
@@ -961,8 +981,58 @@ function getApprovedRequestsInCurrentAnniversaryCycle_(employee, requests) {
       return false;
     }
 
-    return requestStart >= cycleStart;
+    return requestStart >= cycleStart && requestStart <= today;
   });
+}
+
+function getUpcomingRequestedRequestsInCurrentAnniversaryCycle_(employee, requests) {
+  const cycleStart = getCurrentAnniversaryStart_(employee);
+  const today = startOfToday_();
+
+  return requests.filter(function (r) {
+    const requestStart = new Date(r.StartDate);
+
+    if (isNaN(requestStart.getTime())) {
+      return false;
+    }
+
+    if (requestStart < cycleStart || requestStart <= today) {
+      return false;
+    }
+
+    return isPendingBalanceStatus_(r.Status) || isApprovedBalanceStatus_(r.Status);
+  });
+}
+
+function getCanonicalBalanceRequests_(requests) {
+  return requests.filter(function (request) {
+    return !isEditRequest_(request) && !isDeniedBalanceStatus_(request.Status);
+  });
+}
+
+function isApprovedBalanceStatus_(status) {
+  return status === STATUS.APPROVED;
+}
+
+function isPendingBalanceStatus_(status) {
+  return (
+    status === STATUS.PENDING_SUPERVISOR ||
+    status === STATUS.PENDING_ADMIN
+  );
+}
+
+function isDeniedBalanceStatus_(status) {
+  return (
+    status === STATUS.DENIED_SUPERVISOR ||
+    status === STATUS.DENIED_ADMIN ||
+    status === STATUS.DENIED_SUPERVISOR_EDIT ||
+    status === STATUS.DENIED_ADMIN_EDIT
+  );
+}
+
+function startOfToday_() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 /**
@@ -1009,8 +1079,9 @@ function dailyAnniversaryRefresh() {
  * Calendar
  *******************************/
 
-function createCalendarEvent_(employee, request) {
+function createCalendarEvent_(employee, request, options) {
   const calendar = getCalendarForEmployee_(employee);
+  const eventOptions = options || {};
 
   const start = parseLocalDate_(request.StartDate);
   const listedEnd = parseLocalDate_(request.EndDate);
@@ -1028,7 +1099,7 @@ function createCalendarEvent_(employee, request) {
   }
 
   // Do not expose the leave type on the calendar.
-  const title = request.EmployeeName + ' - PTO';
+  const title = request.EmployeeName + ' - PTO' + (eventOptions.titleSuffix || '');
 
   const description =
     'Approved staff time off\n\n' +
@@ -1055,6 +1126,18 @@ function deleteCalendarEvent_(employee, calendarEventId) {
   }
 }
 
+function findCalendarEvent_(employee, calendarEventId) {
+  if (!calendarEventId) {
+    return null;
+  }
+
+  try {
+    return getCalendarForEmployee_(employee).getEventById(calendarEventId);
+  } catch (err) {
+    return null;
+  }
+}
+
 function getCalendarForEmployee_(employee) {
   const settings = getSettings_();
 
@@ -1073,14 +1156,20 @@ function getCalendarForEmployee_(employee) {
 
 function applyApprovedEditRequest_(editRequest, employee, warnings) {
   const originalRequest = getRequestById_(editRequest.OriginalRequestId);
+  const previousEvent = findCalendarEvent_(employee, originalRequest && originalRequest.CalendarEventId);
+  const titleSuffix = previousEvent ? '' : ' (updated)';
 
   if (!originalRequest) {
     throw new Error('Original approved request not found for this schedule change.');
   }
 
-  const calendarEventId = createCalendarEvent_(employee, editRequest);
+  const calendarEventId = createCalendarEvent_(employee, editRequest, {
+    titleSuffix: titleSuffix
+  });
 
-  deleteCalendarEvent_(employee, originalRequest.CalendarEventId);
+  if (previousEvent) {
+    deleteCalendarEvent_(employee, originalRequest.CalendarEventId);
+  }
 
   updateRequest_(originalRequest.RequestId, {
     StartDate: editRequest.StartDate,
@@ -1103,13 +1192,13 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
     originalRequest.RequestId,
     JSON.stringify({
       editRequestId: editRequest.RequestId,
-      calendarEventId: calendarEventId
+      calendarEventId: calendarEventId,
+      previousCalendarEventFound: Boolean(previousEvent)
     })
   );
 
   return calendarEventId;
 }
-
 
 /*******************************
  * Email
@@ -1163,7 +1252,6 @@ function sendSupervisorEmail_(request) {
     htmlBody: htmlBody
   });
 }
-
 
 function sendAdminFinalApprovalEmail_(request) {
   const settings = getSettings_();
@@ -1225,7 +1313,6 @@ function sendAdminFinalApprovalEmail_(request) {
     htmlBody: htmlBody
   });
 }
-
 
 function sendEditApprovalRequestEmails_(request) {
   const formattedDates =
@@ -1336,11 +1423,9 @@ function sendEditApprovalRequestEmails_(request) {
   }
 }
 
-
 function sendEmployeeEmail_(to, subject, body) {
   GmailApp.sendEmail(to, subject, body);
 }
-
 
 /*******************************
  * Email formatting helpers
@@ -1377,7 +1462,6 @@ function formatPtoDate_(dateValue) {
     'EEEE, MMMM d, yyyy'
   );
 }
-
 
 /**
  * Builds the formatted HTML version of a PTO email.
@@ -1470,7 +1554,6 @@ function buildPtoEmailHtml_(options) {
                 'border-radius:8px;' +
                 'overflow:hidden;' +
               '">' +
-
               '<tr>' +
                 '<td style="' +
                   'padding:24px 28px;' +
@@ -1496,7 +1579,6 @@ function buildPtoEmailHtml_(options) {
                   '</div>' +
                 '</td>' +
               '</tr>' +
-
               '<tr>' +
                 '<td style="padding:26px 28px;">' +
                   '<div style="' +
@@ -1507,7 +1589,6 @@ function buildPtoEmailHtml_(options) {
                   '">' +
                     options.intro +
                   '</div>' +
-
                   '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
                     'style="' +
                       'width:100%;' +
@@ -1519,10 +1600,8 @@ function buildPtoEmailHtml_(options) {
                     '">' +
                     detailRows +
                   '</table>' +
-
                   warningBlock +
                   noticeBlock +
-
                   '<div style="' +
                     'margin-top:24px;' +
                     'padding-top:18px;' +
@@ -1542,7 +1621,6 @@ function buildPtoEmailHtml_(options) {
                   '</div>' +
                 '</td>' +
               '</tr>' +
-
               '<tr>' +
                 '<td style="' +
                   'padding:16px 28px;' +
@@ -1555,7 +1633,6 @@ function buildPtoEmailHtml_(options) {
                   'This is an automated PTO notification.' +
                 '</td>' +
               '</tr>' +
-
             '</table>' +
           '</td>' +
         '</tr>' +
@@ -1564,7 +1641,6 @@ function buildPtoEmailHtml_(options) {
     '</html>'
   );
 }
-
 
 /**
  * Safely formats values placed inside the HTML detail table.
@@ -1579,7 +1655,6 @@ function formatEmailValue_(value) {
 
   return escapeHtml_(safeValue).replace(/\r?\n/g, '<br>');
 }
-
 
 /**
  * Prevents request data from breaking the email HTML.
@@ -1596,8 +1671,6 @@ function escapeHtml_(value) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-
-
 
 /*******************************
  * Data Access
