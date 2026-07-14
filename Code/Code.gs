@@ -1115,14 +1115,39 @@ function createCalendarEvent_(employee, request, options) {
 
 function deleteCalendarEvent_(employee, calendarEventId) {
   if (!calendarEventId) {
-    return;
+    return {
+      deleted: false,
+      missing: true
+    };
   }
 
-  const calendar = getCalendarForEmployee_(employee);
-  const event = calendar.getEventById(calendarEventId);
+  try {
+    const calendar = getCalendarForEmployee_(employee);
+    const event = calendar.getEventById(calendarEventId);
 
-  if (event) {
+    if (!event) {
+      return {
+        deleted: false,
+        missing: true
+      };
+    }
+
     event.deleteEvent();
+    return {
+      deleted: true,
+      missing: false
+    };
+  } catch (err) {
+    const message = err && err.message ? String(err.message) : String(err);
+
+    if (message.indexOf('does not exist') >= 0 || message.indexOf('already been deleted') >= 0) {
+      return {
+        deleted: false,
+        missing: true
+      };
+    }
+
+    throw err;
   }
 }
 
@@ -1158,6 +1183,10 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
   const originalRequest = getRequestById_(editRequest.OriginalRequestId);
   const previousEvent = findCalendarEvent_(employee, originalRequest && originalRequest.CalendarEventId);
   const titleSuffix = previousEvent ? '' : ' (updated)';
+  let deleteOutcome = {
+    deleted: false,
+    missing: !previousEvent
+  };
 
   if (!originalRequest) {
     throw new Error('Original approved request not found for this schedule change.');
@@ -1168,7 +1197,7 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
   });
 
   if (previousEvent) {
-    deleteCalendarEvent_(employee, originalRequest.CalendarEventId);
+    deleteOutcome = deleteCalendarEvent_(employee, originalRequest.CalendarEventId);
   }
 
   updateRequest_(originalRequest.RequestId, {
@@ -1193,7 +1222,9 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
     JSON.stringify({
       editRequestId: editRequest.RequestId,
       calendarEventId: calendarEventId,
-      previousCalendarEventFound: Boolean(previousEvent)
+      previousCalendarEventFound: Boolean(previousEvent),
+      previousCalendarEventDeleted: Boolean(deleteOutcome.deleted),
+      previousCalendarEventMissingAtDelete: Boolean(deleteOutcome.missing)
     })
   );
 
