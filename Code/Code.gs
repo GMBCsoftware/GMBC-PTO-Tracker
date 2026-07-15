@@ -133,16 +133,13 @@ function getBootstrapData() {
   });
 
   const supervisorRequests = allRequestsRaw.filter(function (r) {
-    return lower_(r.SupervisorEmail) === lower_(employee.Email) &&
-      (
-        r.Status === STATUS.PENDING_SUPERVISOR ||
-        r.Status === STATUS.PENDING_SUPERVISOR_EDIT
-      );
+    return lower_(r.SupervisorEmail) === lower_(employee.Email);
   });
 
   const allRequests = isAdminUser ? allRequestsRaw : [];
 
   const balances = calculateBalances_(employee, myRequests);
+  const visibleMyRequests = getRequestsVisibleInCurrentAnniversaryCycle_(employee, myRequests);
 
   return makeClientSafe_({
     ok: true,
@@ -153,7 +150,7 @@ function getBootstrapData() {
     isAdmin: isAdminUser,
     isSupervisor: isSupervisorUser,
     balances: balances,
-    myRequests: sortRequests_(myRequests),
+    myRequests: sortRequests_(visibleMyRequests),
     supervisorRequests: sortRequests_(supervisorRequests),
     allRequests: sortRequests_(allRequests)
   });
@@ -1168,6 +1165,26 @@ function getUpcomingRequestedRequestsInCurrentAnniversaryCycle_(employee, reques
 function getCanonicalBalanceRequests_(requests) {
   return requests.filter(function (request) {
     return !isEditRequest_(request) && !isDeniedBalanceStatus_(request.Status);
+  });
+}
+
+function getRequestsVisibleInCurrentAnniversaryCycle_(employee, requests) {
+  const anniversaryDate = getAnniversaryDate_(employee);
+
+  if (!anniversaryDate) {
+    return requests.slice();
+  }
+
+  const cycleStart = getCurrentAnniversaryStart_(employee);
+
+  return requests.filter(function (request) {
+    const requestStart = new Date(request.StartDate);
+
+    if (isNaN(requestStart.getTime())) {
+      return true;
+    }
+
+    return requestStart >= cycleStart;
   });
 }
 

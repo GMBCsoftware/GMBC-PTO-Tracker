@@ -124,6 +124,11 @@
       display: none;
     }
 
+    .subtle {
+      color: #8b8b8b;
+      font-size: 12px;
+    }
+
     .edit-card {
       border: 2px solid #333F48;
     }
@@ -143,6 +148,71 @@
     .account-tools p {
       margin: 0;
     }
+
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .filter-bar select {
+      width: auto;
+      min-width: 220px;
+      margin-top: 0;
+    }
+
+    .request-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .request-item {
+      border: 1px solid #e8ddc8;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fffdfa;
+    }
+
+    .request-toggle {
+      width: 100%;
+      margin: 0;
+      border-radius: 0;
+      background: #fffdfa;
+      color: #333F48;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      text-align: left;
+    }
+
+    .request-toggle:hover {
+      background: #f7f3ea;
+    }
+
+    .request-summary {
+      font-weight: bold;
+    }
+
+    .request-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .request-detail {
+      padding: 16px;
+      border-top: 1px solid #e8ddc8;
+    }
+
+    .request-detail p {
+      margin: 0 0 10px;
+    }
   </style>
 </head>
 
@@ -160,6 +230,9 @@ if (APP_BOOT_ELEMENT) {
 
 var DATA = null;
 var ADMIN_FILTER = 'pending';
+var SUPERVISOR_FILTER = 'pending';
+var ADMIN_EMPLOYEE_FILTER = 'all';
+var SUPERVISOR_EMPLOYEE_FILTER = 'all';
 var BOOTSTRAP_TIMEOUT = null;
 var BOOTSTRAP_TIMEOUT_MS = 15000;
 
@@ -257,7 +330,7 @@ function render(data) {
     renderBalances(data.balances) +
     renderRequestForm() +
     renderRequests('My Requests', data.myRequests, false, false) +
-    (data.isSupervisor ? renderRequests('Supervisor Approval Dashboard', data.supervisorRequests, false, true) : '') +
+    (data.isSupervisor ? renderSupervisorDashboard(data.supervisorRequests) : '') +
     (data.isAdmin ? renderAdminDashboard(data.allRequests) : '');
 
   initializeHoursRecommendationWidgets();
@@ -273,25 +346,29 @@ function renderBalances(b) {
           '<p><strong>Allowance:</strong> ' + escapeHtml(b.annual.allowanceHours) + ' hrs</p>' +
           '<p><strong>Used:</strong> ' + escapeHtml(b.annual.usedHours) + ' hrs</p>' +
           '<p><strong>Requested:</strong> ' + escapeHtml(b.annual.requestedHours) + ' hrs</p>' +
-          '<p><strong>Available Now:</strong> ' + escapeHtml(b.annual.availableHours) + ' hrs</p>' +
+          '<p><strong>Available Now:</strong> ' + escapeHtml(b.annual.availableHours) + ' hrs ' + renderProjectedBalance(b.annual.remainingAfterRequestedHours) + '</p>' +
         '</div>' +
         '<div class="card">' +
           '<h3>Personal Leave</h3>' +
           '<p><strong>Allowance:</strong> ' + escapeHtml(b.personal.allowanceHours) + ' hrs</p>' +
           '<p><strong>Used:</strong> ' + escapeHtml(b.personal.usedHours) + ' hrs</p>' +
           '<p><strong>Requested:</strong> ' + escapeHtml(b.personal.requestedHours) + ' hrs</p>' +
-          '<p><strong>Available Now:</strong> ' + escapeHtml(b.personal.availableHours) + ' hrs</p>' +
+          '<p><strong>Available Now:</strong> ' + escapeHtml(b.personal.availableHours) + ' hrs ' + renderProjectedBalance(b.personal.remainingAfterRequestedHours) + '</p>' +
         '</div>' +
         '<div class="card">' +
           '<h3>Serious Illness</h3>' +
           '<p><strong>Allowance:</strong> ' + escapeHtml(b.serious.allowanceHours) + ' hrs</p>' +
           '<p><strong>Used:</strong> ' + escapeHtml(b.serious.usedHours) + ' hrs</p>' +
           '<p><strong>Requested:</strong> ' + escapeHtml(b.serious.requestedHours) + ' hrs</p>' +
-          '<p><strong>Available Now:</strong> ' + escapeHtml(b.serious.availableHours) + ' hrs</p>' +
+          '<p><strong>Available Now:</strong> ' + escapeHtml(b.serious.availableHours) + ' hrs ' + renderProjectedBalance(b.serious.remainingAfterRequestedHours) + '</p>' +
         '</div>' +
       '</div>' +
     '</div>'
   );
+}
+
+function renderProjectedBalance(value) {
+  return '<span class="subtle">(after requested: ' + escapeHtml(value) + ' hrs)</span>';
 }
 
 function renderRequestForm() {
@@ -336,15 +413,37 @@ function renderAdminDashboard(requests) {
   var approvedClass = ADMIN_FILTER === 'approved' ? ' active' : '';
   var deniedClass = ADMIN_FILTER === 'denied' ? ' active' : '';
   var allClass = ADMIN_FILTER === 'all' ? ' active' : '';
+  var filteredRequests = filterRequestsForDashboard(requests || [], ADMIN_FILTER, ADMIN_EMPLOYEE_FILTER);
 
   return (
     '<div class="card">' +
       '<h2>Admin Dashboard</h2>' +
+      renderEmployeeFilterControl('adminEmployeeFilter', ADMIN_EMPLOYEE_FILTER, requests || [], 'setAdminEmployeeFilter') +
       '<button class="tab' + pendingClass + '" onclick="setAdminFilter(\'pending\')">Pending / Unapproved</button>' +
       '<button class="tab' + approvedClass + '" onclick="setAdminFilter(\'approved\')">Approved</button>' +
       '<button class="tab' + deniedClass + '" onclick="setAdminFilter(\'denied\')">Denied</button>' +
       '<button class="tab' + allClass + '" onclick="setAdminFilter(\'all\')">All</button>' +
-      renderRequestsTable(filterAdminRequests(requests || []), true, false) +
+      renderRequestsTable(filteredRequests, true, false) +
+    '</div>'
+  );
+}
+
+function renderSupervisorDashboard(requests) {
+  var pendingClass = SUPERVISOR_FILTER === 'pending' ? ' active' : '';
+  var approvedClass = SUPERVISOR_FILTER === 'approved' ? ' active' : '';
+  var deniedClass = SUPERVISOR_FILTER === 'denied' ? ' active' : '';
+  var allClass = SUPERVISOR_FILTER === 'all' ? ' active' : '';
+  var filteredRequests = filterRequestsForDashboard(requests || [], SUPERVISOR_FILTER, SUPERVISOR_EMPLOYEE_FILTER);
+
+  return (
+    '<div class="card">' +
+      '<h2>Supervisor Dashboard</h2>' +
+      renderEmployeeFilterControl('supervisorEmployeeFilter', SUPERVISOR_EMPLOYEE_FILTER, requests || [], 'setSupervisorEmployeeFilter') +
+      '<button class="tab' + pendingClass + '" onclick="setSupervisorFilter(\'pending\')">Pending / Unapproved</button>' +
+      '<button class="tab' + approvedClass + '" onclick="setSupervisorFilter(\'approved\')">Approved</button>' +
+      '<button class="tab' + deniedClass + '" onclick="setSupervisorFilter(\'denied\')">Denied</button>' +
+      '<button class="tab' + allClass + '" onclick="setSupervisorFilter(\'all\')">All</button>' +
+      renderRequestsTable(filteredRequests, false, true) +
     '</div>'
   );
 }
@@ -354,35 +453,44 @@ function setAdminFilter(filter) {
   render(DATA);
 }
 
-function filterAdminRequests(requests) {
+function setSupervisorFilter(filter) {
+  SUPERVISOR_FILTER = filter;
+  render(DATA);
+}
+
+function setAdminEmployeeFilter(value) {
+  ADMIN_EMPLOYEE_FILTER = value || 'all';
+  render(DATA);
+}
+
+function setSupervisorEmployeeFilter(value) {
+  SUPERVISOR_EMPLOYEE_FILTER = value || 'all';
+  render(DATA);
+}
+
+function filterRequestsForDashboard(requests, bucket, employeeFilter) {
   var i;
   var filtered = [];
+  var status;
 
   for (i = 0; i < requests.length; i++) {
     if (
-      ADMIN_FILTER === 'approved' &&
-      (requests[i].Status === 'Approved' || requests[i].Status === 'Edit Approved')
+      employeeFilter &&
+      employeeFilter !== 'all' &&
+      String(requests[i].EmployeeEmail || '').toLowerCase() !== String(employeeFilter).toLowerCase()
     ) {
+      continue;
+    }
+
+    status = requests[i].Status;
+
+    if (bucket === 'approved' && isApprovedStatus(status)) {
       filtered.push(requests[i]);
-    } else if (
-      ADMIN_FILTER === 'denied' &&
-      (
-        requests[i].Status === 'Denied by Supervisor' ||
-        requests[i].Status === 'Denied by Admin' ||
-        requests[i].Status === 'Edit Denied by Supervisor' ||
-        requests[i].Status === 'Edit Denied by Admin'
-      )
-    ) {
+    } else if (bucket === 'denied' && isDeniedStatus(status)) {
       filtered.push(requests[i]);
-    } else if (ADMIN_FILTER === 'all') {
+    } else if (bucket === 'all') {
       filtered.push(requests[i]);
-    } else if (
-      ADMIN_FILTER === 'pending' &&
-      (requests[i].Status === 'Pending Supervisor Approval' ||
-        requests[i].Status === 'Pending Admin Final Approval' ||
-        requests[i].Status === 'Pending Supervisor Reapproval' ||
-        requests[i].Status === 'Pending Admin Reapproval')
-    ) {
+    } else if (bucket === 'pending' && isPendingStatus(status)) {
       filtered.push(requests[i]);
     }
   }
@@ -390,13 +498,149 @@ function filterAdminRequests(requests) {
   return filtered;
 }
 
+function isApprovedStatus(status) {
+  return status === 'Approved' || status === 'Edit Approved';
+}
+
+function isDeniedStatus(status) {
+  return (
+    status === 'Denied by Supervisor' ||
+    status === 'Denied by Admin' ||
+    status === 'Edit Denied by Supervisor' ||
+    status === 'Edit Denied by Admin'
+  );
+}
+
+function isPendingStatus(status) {
+  return (
+    status === 'Pending Supervisor Approval' ||
+    status === 'Pending Admin Final Approval' ||
+    status === 'Pending Supervisor Reapproval' ||
+    status === 'Pending Admin Reapproval'
+  );
+}
+
+function renderEmployeeFilterControl(selectId, selectedValue, requests, onChangeHandler) {
+  var employees = getEmployeeFilterOptions(requests || []);
+  var i;
+  var options = '<option value="all">All employees</option>';
+
+  for (i = 0; i < employees.length; i++) {
+    options +=
+      '<option value="' + escapeAttr(employees[i].email) + '"' +
+      (selectedValue === employees[i].email ? ' selected' : '') +
+      '>' + escapeHtml(employees[i].name) + '</option>';
+  }
+
+  return (
+    '<div class="filter-bar">' +
+      '<label for="' + escapeAttr(selectId) + '">Employee</label>' +
+      '<select id="' + escapeAttr(selectId) + '" onchange="' + onChangeHandler + '(this.value)">' +
+        options +
+      '</select>' +
+    '</div>'
+  );
+}
+
+function getEmployeeFilterOptions(requests) {
+  var map = {};
+  var emails = [];
+  var i;
+
+  for (i = 0; i < requests.length; i++) {
+    if (!requests[i].EmployeeEmail) {
+      continue;
+    }
+
+    if (!map[requests[i].EmployeeEmail]) {
+      map[requests[i].EmployeeEmail] = requests[i].EmployeeName || requests[i].EmployeeEmail;
+      emails.push(requests[i].EmployeeEmail);
+    }
+  }
+
+  emails.sort(function(a, b) {
+    var aName = map[a].toLowerCase();
+    var bName = map[b].toLowerCase();
+
+    if (aName < bName) {
+      return -1;
+    }
+
+    if (aName > bName) {
+      return 1;
+    }
+
+    return 0;
+  });
+
+  return emails.map(function(email) {
+    return {
+      email: email,
+      name: map[email]
+    };
+  });
+}
+
 function renderRequests(title, requests, adminMode, supervisorMode) {
+  var content = adminMode || supervisorMode
+    ? renderRequestsTable(requests, adminMode, supervisorMode)
+    : renderEmployeeRequests(requests);
+
   return (
     '<div class="card">' +
       '<h2>' + escapeHtml(title) + '</h2>' +
-      renderRequestsTable(requests, adminMode, supervisorMode) +
+      content +
     '</div>'
   );
+}
+
+function renderEmployeeRequests(requests) {
+  var i;
+  var html = '';
+  var statusHint;
+  var reasonText;
+  var warningsHtml;
+
+  if (!requests || !requests.length) {
+    return '<p class="muted">No requests found in your current anniversary cycle.</p>';
+  }
+
+  for (i = 0; i < requests.length; i++) {
+    statusHint = getStatusHintText(requests[i]);
+    reasonText = requests[i].Reason ? escapeHtml(requests[i].Reason) : 'No reason provided';
+    warningsHtml = requests[i].Warnings
+      ? '<p><strong>Warnings:</strong> <span class="warning">' + escapeHtml(requests[i].Warnings) + '</span></p>'
+      : '';
+
+    html +=
+      '<div class="request-item">' +
+        '<button type="button" class="request-toggle" onclick="toggleRequestDetails(\'' + escapeAttr(requests[i].RequestId) + '\')">' +
+          '<span class="request-summary">' +
+            escapeHtml(formatDisplayDate(requests[i].StartDate)) + ' - ' +
+            escapeHtml(formatDisplayDate(requests[i].EndDate)) + ' - ' +
+            escapeHtml(requests[i].HoursRequested || '') + ' hours - ' +
+            escapeHtml(requests[i].Status || '') +
+          '</span>' +
+          '<span class="request-meta">' +
+            '<span class="pill">' + escapeHtml(statusHint) + '</span>' +
+            '<span class="muted">View details</span>' +
+          '</span>' +
+        '</button>' +
+        '<div id="request-detail-' + escapeAttr(requests[i].RequestId) + '" class="request-detail hidden">' +
+          '<p><strong>Leave type:</strong> ' + escapeHtml(requests[i].LeaveType || '') + '</p>' +
+          '<p><strong>Dates:</strong> ' + escapeHtml(formatDisplayDate(requests[i].StartDate)) + ' to ' + escapeHtml(formatDisplayDate(requests[i].EndDate)) + '</p>' +
+          '<p><strong>Hours requested:</strong> ' + escapeHtml(requests[i].HoursRequested || '') + '</p>' +
+          '<p><strong>Reason / Notes:</strong> ' + reasonText + '</p>' +
+          warningsHtml +
+          '<div class="actions">' + renderEmployeeButtons(requests[i]) + '</div>' +
+          '<div id="edit-row-' + escapeAttr(requests[i].RequestId) + '" class="hidden">' +
+            renderEditCard(requests[i]) +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  return '<div class="request-list">' + html + '</div>';
 }
 
 function renderRequestsTable(requests, adminMode, supervisorMode) {
@@ -601,6 +845,22 @@ function toggleEditCard(requestId) {
       row.className += ' hidden';
     }
   }
+}
+
+function toggleRequestDetails(requestId) {
+  var detail = document.getElementById('request-detail-' + requestId);
+
+  if (!detail) {
+    return;
+  }
+
+  if (detail.className.indexOf('hidden') >= 0) {
+    detail.className = detail.className.replace('hidden', '').trim();
+    refreshEditHoursRecommendation(requestId);
+    return;
+  }
+
+  detail.className += ' hidden';
 }
 
 function saveRequestEdit(requestId) {
