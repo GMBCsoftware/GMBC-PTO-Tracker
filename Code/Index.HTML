@@ -331,7 +331,7 @@ function render(data) {
     renderRequestForm() +
     renderRequests('My Requests', data.myRequests, false, false) +
     (data.isSupervisor ? renderSupervisorDashboard(data.supervisorRequests) : '') +
-    (data.isAdmin ? renderAdminDashboard(data.allRequests) : '');
+    (data.isAdmin ? renderAdminDashboard(data.allRequests, data.employees) : '');
 
   initializeHoursRecommendationWidgets();
 }
@@ -408,7 +408,7 @@ function renderRequestForm() {
   );
 }
 
-function renderAdminDashboard(requests) {
+function renderAdminDashboard(requests, employees) {
   var pendingClass = ADMIN_FILTER === 'pending' ? ' active' : '';
   var approvedClass = ADMIN_FILTER === 'approved' ? ' active' : '';
   var deniedClass = ADMIN_FILTER === 'denied' ? ' active' : '';
@@ -418,12 +418,65 @@ function renderAdminDashboard(requests) {
   return (
     '<div class="card">' +
       '<h2>Admin Dashboard</h2>' +
+      renderAdminRequestForm(employees || []) +
       renderEmployeeFilterControl('adminEmployeeFilter', ADMIN_EMPLOYEE_FILTER, requests || [], 'setAdminEmployeeFilter') +
       '<button class="tab' + pendingClass + '" onclick="setAdminFilter(\'pending\')">Pending / Unapproved</button>' +
       '<button class="tab' + approvedClass + '" onclick="setAdminFilter(\'approved\')">Approved</button>' +
       '<button class="tab' + deniedClass + '" onclick="setAdminFilter(\'denied\')">Denied</button>' +
       '<button class="tab' + allClass + '" onclick="setAdminFilter(\'all\')">All</button>' +
       renderRequestsTable(filteredRequests, true, false) +
+    '</div>'
+  );
+}
+
+function renderAdminRequestForm(employees) {
+  var i;
+  var employeeOptions = '<option value="">Select staff member</option>';
+
+  for (i = 0; i < employees.length; i++) {
+    employeeOptions +=
+      '<option value="' + escapeAttr(employees[i].Email || '') + '">' +
+      escapeHtml(employees[i].Name || employees[i].Email || '') +
+      '</option>';
+  }
+
+  return (
+    '<div class="card">' +
+      '<h3>Add Request For Staff Member</h3>' +
+      '<p class="muted">Use this form when an admin needs to enter PTO on behalf of a staff member. The request will be sent to that employee\'s supervisor for approval.</p>' +
+      '<label>Staff Member</label>' +
+      '<select id="adminEmployeeEmail">' +
+        employeeOptions +
+      '</select>' +
+      '<label>Leave Type</label>' +
+      '<select id="adminLeaveType">' +
+        '<option>Annual Leave</option>' +
+        '<option>Personal Leave</option>' +
+        '<option>Serious Illness Leave</option>' +
+        '<option>Bereavement Leave</option>' +
+        '<option>Unpaid Leave</option>' +
+        '<option>Other</option>' +
+      '</select>' +
+      '<div class="grid">' +
+        '<div>' +
+          '<label>Start Date</label>' +
+          '<input id="adminStartDate" type="date" onchange="refreshAdminHoursRecommendation()">' +
+        '</div>' +
+        '<div>' +
+          '<label>End Date</label>' +
+          '<input id="adminEndDate" type="date" onchange="refreshAdminHoursRecommendation()">' +
+        '</div>' +
+        '<div>' +
+          '<label>Hours Requested</label>' +
+          '<input id="adminHoursRequested" type="number" step="0.25" min="0">' +
+        '</div>' +
+      '</div>' +
+      '<p id="adminHoursRecommendation" class="muted"></p>' +
+      '<button type="button" class="light" onclick="applyAdminHoursRecommendation()">Use Recommended Hours</button>' +
+      '<label>Reason / Notes</label>' +
+      '<textarea id="adminReason"></textarea>' +
+      '<button onclick="submitAdminRequest()">Add Request For Staff</button>' +
+      '<p id="adminSubmitResult" class="muted"></p>' +
     '</div>'
   );
 }
@@ -727,7 +780,7 @@ function getStatusHintText(request) {
   }
 
   if (request.Status === 'Pending Supervisor Reapproval') {
-    return 'Change waiting on supervisor reapproval';
+    return 'Change waiting on supervisor final approval';
   }
 
   if (request.Status === 'Pending Admin Reapproval') {
@@ -904,6 +957,10 @@ function refreshHoursRecommendation() {
   refreshRecommendationForFields('startDate', 'endDate', 'hoursRequested', 'hoursRecommendation');
 }
 
+function refreshAdminHoursRecommendation() {
+  refreshRecommendationForFields('adminStartDate', 'adminEndDate', 'adminHoursRequested', 'adminHoursRecommendation');
+}
+
 function refreshEditHoursRecommendation(requestId) {
   refreshRecommendationForFields(
     'edit-start-' + requestId,
@@ -916,6 +973,11 @@ function refreshEditHoursRecommendation(requestId) {
 function applyHoursRecommendation() {
   applyRecommendationForField('startDate', 'endDate', 'hoursRequested');
   refreshHoursRecommendation();
+}
+
+function applyAdminHoursRecommendation() {
+  applyRecommendationForField('adminStartDate', 'adminEndDate', 'adminHoursRequested');
+  refreshAdminHoursRecommendation();
 }
 
 function applyEditHoursRecommendation(requestId) {
@@ -1080,6 +1142,29 @@ function submitRequest() {
       document.getElementById('submitResult').innerText = err.message || String(err);
     })
     .submitRequest(payload);
+}
+
+function submitAdminRequest() {
+  var payload = {
+    employeeEmail: document.getElementById('adminEmployeeEmail').value,
+    leaveType: document.getElementById('adminLeaveType').value,
+    startDate: document.getElementById('adminStartDate').value,
+    endDate: document.getElementById('adminEndDate').value,
+    hoursRequested: document.getElementById('adminHoursRequested').value,
+    reason: document.getElementById('adminReason').value
+  };
+
+  document.getElementById('adminSubmitResult').innerText = 'Submitting...';
+
+  google.script.run
+    .withSuccessHandler(function(res) {
+      document.getElementById('adminSubmitResult').innerText = res.message;
+      load();
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('adminSubmitResult').innerText = err.message || String(err);
+    })
+    .submitAdminRequest(payload);
 }
 
 function supervisorDecision(requestId, decision) {

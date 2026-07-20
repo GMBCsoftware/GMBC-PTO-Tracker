@@ -137,6 +137,7 @@ function getBootstrapData() {
   });
 
   const allRequests = isAdminUser ? allRequestsRaw : [];
+  const employees = isAdminUser ? sortEmployees_(getEmployees_()) : [];
 
   const balances = calculateBalances_(employee, myRequests);
   const visibleMyRequests = getRequestsVisibleInCurrentAnniversaryCycle_(employee, myRequests);
@@ -152,7 +153,8 @@ function getBootstrapData() {
     balances: balances,
     myRequests: sortRequests_(visibleMyRequests),
     supervisorRequests: sortRequests_(supervisorRequests),
-    allRequests: sortRequests_(allRequests)
+    allRequests: sortRequests_(allRequests),
+    employees: employees
   });
 }
 
@@ -256,6 +258,103 @@ function submitRequest(payload) {
   };
 }
 
+function submitAdminRequest(payload) {
+  ensureRequestSheetColumns_();
+  const user = getCurrentUser_();
+
+  if (!isAdmin_(user.email)) {
+    throw new Error('Only admins can add requests on behalf of staff members.');
+  }
+
+  const employeeEmail = String(payload.employeeEmail || '').trim();
+  const employee = getEmployeeByEmail_(employeeEmail);
+
+  if (!employee) {
+    throw new Error('Please choose a valid staff member.');
+  }
+
+  const leaveType = String(payload.leaveType || '').trim();
+  const startDate = String(payload.startDate || '').trim();
+  const endDate = String(payload.endDate || '').trim();
+  const hoursRequested = Number(payload.hoursRequested || 0);
+  const reason = String(payload.reason || '').trim();
+
+  if (!leaveType) {
+    throw new Error('Please choose a leave type.');
+  }
+
+  if (!startDate || !endDate) {
+    throw new Error('Please enter a start date and end date.');
+  }
+
+  if (!hoursRequested || hoursRequested <= 0) {
+    throw new Error('Please enter the number of hours requested.');
+  }
+
+  if (new Date(endDate) < new Date(startDate)) {
+    throw new Error('End date cannot be before start date.');
+  }
+
+  const existingEmployeeRequests = getRequests_().filter(function (r) {
+    return lower_(r.EmployeeEmail) === lower_(employee.Email);
+  });
+
+  const warnings = validateRequest_(
+    employee,
+    leaveType,
+    startDate,
+    endDate,
+    hoursRequested,
+    existingEmployeeRequests,
+    false
+  );
+
+  const request = {
+    RequestId: Utilities.getUuid(),
+    EmployeeEmail: employee.Email,
+    EmployeeName: employee.Name,
+    LeaveType: leaveType,
+    StartDate: startDate,
+    EndDate: endDate,
+    HoursRequested: hoursRequested,
+    Reason: reason,
+    Status: STATUS.PENDING_SUPERVISOR,
+    SupervisorEmail: employee.SupervisorEmail,
+    SupervisorDecision: '',
+    SupervisorDecisionDate: '',
+    AdminDecision: '',
+    AdminDecisionDate: '',
+    CalendarEventId: '',
+    Warnings: warnings.join(' | '),
+    ChangeType: '',
+    OriginalRequestId: '',
+    PreviousVersionJson: '',
+    CreatedAt: now_(),
+    UpdatedAt: now_()
+  };
+
+  appendObject_(SHEETS.REQUESTS, request);
+
+  audit_(
+    user.email,
+    'Admin submitted PTO request',
+    request.RequestId,
+    JSON.stringify({
+      createdFor: employee.Email,
+      request: request
+    })
+  );
+
+  sendSupervisorEmail_(request);
+
+  return {
+    ok: true,
+    message: warnings.length
+      ? 'Request added for ' + employee.Name + ' with warning(s): ' + warnings.join(' ')
+      : 'Request added for ' + employee.Name + ' and sent to their supervisor.'
+  };
+}
+
 /*******************************
  * Supervisor Approval
  *******************************/
@@ -326,7 +425,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
     SupervisorDecision: approved ? 'Approved' : 'Denied',
     SupervisorDecisionDate: now_(),
     Status: approved
-      ? (isEditRequest ? STATUS.PENDING_ADMIN_EDIT : STATUS.PENDING_ADMIN)
+      ? (isEditRequest ? STATUS.APPROVED_EDIT : STATUS.PENDING_ADMIN)
       : (isEditRequest ? STATUS.DENIED_SUPERVISOR_EDIT : STATUS.DENIED_SUPERVISOR),
     Warnings: warnings,
     UpdatedAt: now_()
@@ -348,7 +447,45 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
   const updatedRequest = Object.assign({}, request, updates);
 
   if (approved) {
-    sendAdminFinalApprovalEmail_(updatedRequest);
+    if (isEditRequest) {
+      const employee = getEmployeeByEmail_(request.EmployeeEmail);
+
+      if (!employee) {
+        throw new Error('Employee not found.');
+      }
+
+      const calendarEventId = applyApprovedEditRequest_(updatedRequest, employee, warnings);
+
+      updateRequest_(requestId, {
+        CalendarEventId: calendarEventId,
+        Warnings: warnings,
+        UpdatedAt: now_()
+      });
+
+      sendEmployeeEmail_(
+        request.EmployeeEmail,
+        'Time off request change approved',
+        'Your ' + request.LeaveType + ' request change has received final supervisor approval.\n\n' +
+        'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
+        'Hours: ' + request.HoursRequested + '\n\n' +
+        (warnings.length ? 'Warning(s): ' + warnings.join(' ') : ''),
+        {
+          eyebrow: 'Final Approval',
+          title: 'Time Off Change Approved',
+          intro: 'Your <strong>' + escapeHtml_(request.LeaveType) + '</strong> change has received final supervisor approval.',
+          details: [
+            ['Leave type', request.LeaveType],
+            ['Dates', formatPtoDateRange_(request.StartDate, request.EndDate)],
+            ['Hours requested', request.HoursRequested],
+            ['Warnings', warnings.length ? warnings.join(' ') : 'None']
+          ],
+          notice: 'Open the PTO app any time to review your request history.',
+          requestId: request.RequestId
+        }
+      );
+    } else {
+      sendAdminFinalApprovalEmail_(updatedRequest);
+    }
   } else {
     sendEmployeeEmail_(
       request.EmployeeEmail,
@@ -1217,7 +1354,7 @@ function startOfToday_() {
  * Optional daily trigger.
  * Since balances are calculated dynamically by anniversary cycle,
  * this does not need to rewrite balances.
- * It simply logs anniversary refreshes.
+ * It sends a reminder email when an active employee reaches their anniversary date.
  */
 function dailyAnniversaryRefresh() {
   const employees = getEmployees_().filter(function (e) {
@@ -1243,14 +1380,84 @@ function dailyAnniversaryRefresh() {
     const sameDay = anniversary.getDate() === today.getDate();
 
     if (sameMonth && sameDay) {
+      const years = getYearsOfService_(employee);
+      const anniversaryText = years > 0
+        ? formatYearsOfService_(years)
+        : 'another year';
+
+      sendEmployeeEmail_(
+        employee.Email,
+        'Happy work anniversary, ' + employee.Name + '!',
+        'Happy work anniversary, ' + employee.Name + '!\n\n' +
+        'Today marks ' + anniversaryText + ' of service at GMBC.\n\n' +
+        'Thank you for all you do.\n\n' +
+        'Anniversary date: ' + formatPtoDate_(anniversaryDate),
+        {
+          eyebrow: 'Work Anniversary',
+          title: 'Happy Anniversary',
+          intro: 'Today marks ' + anniversaryText + ' of service at GMBC.',
+          details: [
+            ['Employee', employee.Name],
+            ['Email', employee.Email],
+            ['Anniversary date', formatPtoDate_(anniversaryDate)],
+            ['Years of service', years ? years.toFixed(2) : 'Unknown']
+          ],
+          notice: 'This is an automatic anniversary reminder from the PTO tracker.',
+          requestId: ''
+        }
+      );
+
       audit_(
         'system',
         'Anniversary refresh',
         '',
-        employee.Email + ' reached anniversary date. Balances reset dynamically by current anniversary cycle.'
+        employee.Email + ' reached anniversary date. Anniversary email sent.'
       );
     }
   });
+}
+
+function formatYearsOfService_(years) {
+  const wholeYears = Math.floor(years);
+  const remainder = years - wholeYears;
+
+  if (wholeYears <= 0) {
+    return 'less than one year';
+  }
+
+  if (wholeYears === 1) {
+    return '1 year';
+  }
+
+  if (remainder < 0.1) {
+    return wholeYears + ' years';
+  }
+
+  return years.toFixed(1) + ' years';
+}
+
+function setupDailyAnniversaryTrigger() {
+  const handler = 'dailyAnniversaryRefresh';
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function (trigger) {
+    if (trigger.getHandlerFunction && trigger.getHandlerFunction() === handler) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  ScriptApp.newTrigger(handler)
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .create();
+
+  audit_(
+    'system',
+    'Created anniversary trigger',
+    '',
+    'Scheduled dailyAnniversaryRefresh to run every day at 8 AM.'
+  );
 }
 
 /*******************************
@@ -1576,60 +1783,6 @@ function sendEditApprovalRequestEmails_(request) {
     );
   }
 
-  const settings = getSettings_();
-  const admins = String(settings.AdminEmails || '')
-    .split(',')
-    .map(function (s) {
-      return s.trim();
-    })
-    .filter(Boolean);
-
-  if (admins.length) {
-    const adminSubject =
-      'Approved PTO request changed - admin heads-up';
-
-    const adminBody =
-      request.EmployeeName +
-      ' updated a previously approved ' +
-      request.LeaveType +
-      ' request.\n\n' +
-      'Updated dates: ' + formattedDates + '\n' +
-      'Updated hours: ' + request.HoursRequested + '\n' +
-      'Reason: ' + (request.Reason || 'No reason provided') + '\n\n' +
-      'The existing approved calendar schedule remains in place until this change finishes reapproval.\n\n' +
-      'You will receive a final approval request after supervisor review.\n\n' +
-      'Request ID:\n' + request.RequestId;
-
-    const adminHtmlBody = buildPtoEmailHtml_({
-      eyebrow: 'PTO Change Notification',
-      title: 'Approved PTO Request Changed',
-      intro:
-        '<strong>' + escapeHtml_(request.EmployeeName) +
-        '</strong> updated a previously approved ' +
-        '<strong>' + escapeHtml_(request.LeaveType) + '</strong> request.',
-      details: [
-        ['Employee', request.EmployeeName],
-        ['Leave type', request.LeaveType],
-        ['Updated dates', formattedDates],
-        ['Updated hours', request.HoursRequested],
-        ['Reason', request.Reason || 'No reason provided']
-      ],
-      warning:
-        'The existing approved calendar schedule remains in place until this change finishes reapproval.',
-      notice:
-        'You will receive a final approval request after supervisor review.',
-      requestId: request.RequestId
-    });
-
-    GmailApp.sendEmail(
-      admins.join(','),
-      adminSubject,
-      adminBody,
-      {
-        htmlBody: adminHtmlBody
-      }
-    );
-  }
 }
 
 function sendEmployeeEmail_(to, subject, body, htmlOptions) {
@@ -2188,6 +2341,23 @@ function sortRequests_(requests) {
     const aDate = a.CreatedAt ? new Date(a.CreatedAt).getTime() : 0;
     const bDate = b.CreatedAt ? new Date(b.CreatedAt).getTime() : 0;
     return bDate - aDate;
+  });
+}
+
+function sortEmployees_(employees) {
+  return employees.sort(function (a, b) {
+    const aName = String(a.Name || a.Email || '').toLowerCase();
+    const bName = String(b.Name || b.Email || '').toLowerCase();
+
+    if (aName < bName) {
+      return -1;
+    }
+
+    if (aName > bName) {
+      return 1;
+    }
+
+    return 0;
   });
 }
 
