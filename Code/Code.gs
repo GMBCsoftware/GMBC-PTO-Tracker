@@ -2029,12 +2029,12 @@ function buildPtoEmailHtml_(options) {
     '<body style="' +
       'margin:0;' +
       'padding:0;' +
-      'background-color:#f3f4f6;' +
+      'background-color:#C1C8D7;' +
       'font-family:Arial,Helvetica,sans-serif;' +
       'color:#111827;' +
     '">' +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
-        'style="width:100%;background-color:#f3f4f6;margin:0;padding:0;">' +
+        'style="width:100%;background-color:#C1C8D7;margin:0;padding:0;">' +
         '<tr>' +
           '<td align="center" style="padding:28px 12px;">' +
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
@@ -2049,7 +2049,7 @@ function buildPtoEmailHtml_(options) {
               '<tr>' +
                 '<td style="' +
                   'padding:24px 28px;' +
-                  'background-color:#333f48;' +
+                  'background-color:#C44D44;' +
                 '">' +
                   '<div style="' +
                     'font-size:11px;' +
