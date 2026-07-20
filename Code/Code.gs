@@ -386,6 +386,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
   const isEditRequest = isEditRequest_(request);
 
   let warnings = String(request.Warnings || '');
+  let warningArray = [];
 
   if (approved) {
     const employee = getEmployeeByEmail_(request.EmployeeEmail);
@@ -408,7 +409,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
       return true;
     });
 
-    const warningArray = validateRequest_(
+    warningArray = validateRequest_(
       employee,
       request.LeaveType,
       request.StartDate,
@@ -454,11 +455,11 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
         throw new Error('Employee not found.');
       }
 
-      const calendarEventId = applyApprovedEditRequest_(updatedRequest, employee, warnings);
+      const calendarEventId = applyApprovedEditRequest_(updatedRequest, employee, warningArray);
 
       updateRequest_(requestId, {
         CalendarEventId: calendarEventId,
-        Warnings: warnings,
+        Warnings: warningArray.join(' | '),
         UpdatedAt: now_()
       });
 
@@ -468,7 +469,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
         'Your ' + request.LeaveType + ' request change has received final supervisor approval.\n\n' +
         'Dates: ' + request.StartDate + ' to ' + request.EndDate + '\n' +
         'Hours: ' + request.HoursRequested + '\n\n' +
-        (warnings.length ? 'Warning(s): ' + warnings.join(' ') : ''),
+        (warningArray.length ? 'Warning(s): ' + warningArray.join(' ') : ''),
         {
           eyebrow: 'Final Approval',
           title: 'Time Off Change Approved',
@@ -477,7 +478,7 @@ function supervisorDecision(requestId, decision, note, overrideBalance) {
             ['Leave type', request.LeaveType],
             ['Dates', formatPtoDateRange_(request.StartDate, request.EndDate)],
             ['Hours requested', request.HoursRequested],
-            ['Warnings', warnings.length ? warnings.join(' ') : 'None']
+            ['Warnings', warningArray.length ? warningArray.join(' ') : 'None']
           ],
           notice: 'Open the PTO app any time to review your request history.',
           requestId: request.RequestId
@@ -1650,6 +1651,15 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
     throw new Error('Original approved request not found for this schedule change.');
   }
 
+  const warningArray = Array.isArray(warnings)
+    ? warnings
+    : String(warnings || '')
+      .split(' | ')
+      .map(function (item) {
+        return String(item || '').trim();
+      })
+      .filter(Boolean);
+
   const calendarEventId = createCalendarEvent_(employee, editRequest, {
     titleSuffix: titleSuffix
   });
@@ -1663,7 +1673,7 @@ function applyApprovedEditRequest_(editRequest, employee, warnings) {
     EndDate: editRequest.EndDate,
     HoursRequested: editRequest.HoursRequested,
     Reason: editRequest.Reason,
-    Warnings: warnings.join(' | '),
+    Warnings: warningArray.join(' | '),
     Status: STATUS.APPROVED,
     SupervisorDecision: 'Approved',
     SupervisorDecisionDate: editRequest.SupervisorDecisionDate || now_(),
