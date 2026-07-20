@@ -1217,7 +1217,7 @@ function getYearsOfService_(employee) {
     return 0;
   }
 
-  const start = new Date(anniversaryDate);
+  const start = parseFlexibleDate_(anniversaryDate);
   const today = new Date();
 
   if (isNaN(start.getTime())) {
@@ -1362,6 +1362,8 @@ function dailyAnniversaryRefresh() {
   });
 
   const today = new Date();
+  const todayKey = formatDateKey_(today);
+  let matchedCount = 0;
 
   employees.forEach(function (employee) {
     const anniversaryDate = getAnniversaryDate_(employee);
@@ -1370,16 +1372,22 @@ function dailyAnniversaryRefresh() {
       return;
     }
 
-    const anniversary = new Date(anniversaryDate);
+    const anniversary = parseFlexibleDate_(anniversaryDate);
 
     if (isNaN(anniversary.getTime())) {
+      audit_(
+        'system',
+        'Anniversary refresh skipped',
+        '',
+        'Invalid anniversary date for ' + employee.Email + ': ' + anniversaryDate
+      );
       return;
     }
 
-    const sameMonth = anniversary.getMonth() === today.getMonth();
-    const sameDay = anniversary.getDate() === today.getDate();
+    const anniversaryKey = formatDateKey_(anniversary);
 
-    if (sameMonth && sameDay) {
+    if (anniversaryKey.slice(5) === todayKey.slice(5)) {
+      matchedCount += 1;
       const years = getYearsOfService_(employee);
       const anniversaryText = years > 0
         ? formatYearsOfService_(years)
@@ -1411,10 +1419,75 @@ function dailyAnniversaryRefresh() {
         'system',
         'Anniversary refresh',
         '',
-        employee.Email + ' reached anniversary date. Anniversary email sent.'
+        employee.Email + ' reached anniversary date (' + anniversaryKey + '). Anniversary email sent.'
+      );
+    } else {
+      audit_(
+        'system',
+        'Anniversary refresh checked',
+        '',
+        employee.Email + ' anniversary ' + anniversaryKey + ' did not match today ' + todayKey + '.'
       );
     }
   });
+
+  if (!matchedCount) {
+    audit_(
+      'system',
+      'Anniversary refresh completed',
+      '',
+      'No active employees matched today (' + todayKey + ').'
+    );
+  }
+}
+
+function formatDateKey_(dateValue) {
+  return Utilities.formatDate(
+    parseFlexibleDate_(dateValue),
+    Session.getScriptTimeZone(),
+    'yyyy-MM-dd'
+  );
+}
+
+function testAnniversaryEmail(email) {
+  const employee = getEmployeeByEmail_(email);
+
+  if (!employee) {
+    throw new Error('Employee not found: ' + email);
+  }
+
+  const anniversaryDate = getAnniversaryDate_(employee);
+
+  if (!anniversaryDate) {
+    throw new Error('No AnniversaryDate is listed for ' + employee.Email);
+  }
+
+  const years = getYearsOfService_(employee);
+  const anniversaryText = years > 0
+    ? formatYearsOfService_(years)
+    : 'another year';
+
+  sendEmployeeEmail_(
+    employee.Email,
+    'Happy work anniversary, ' + employee.Name + '!',
+    'Happy work anniversary, ' + employee.Name + '!\n\n' +
+    'Today marks ' + anniversaryText + ' of service at GMBC.\n\n' +
+    'Thank you for all you do.\n\n' +
+    'Anniversary date: ' + formatPtoDate_(anniversaryDate),
+    {
+      eyebrow: 'Work Anniversary',
+      title: 'Happy Anniversary',
+      intro: 'Today marks ' + anniversaryText + ' of service at GMBC.',
+      details: [
+        ['Employee', employee.Name],
+        ['Email', employee.Email],
+        ['Anniversary date', formatPtoDate_(anniversaryDate)],
+        ['Years of service', years ? years.toFixed(2) : 'Unknown']
+      ],
+      notice: 'This is a manual test email from the PTO tracker.',
+      requestId: ''
+    }
+  );
 }
 
 function formatYearsOfService_(years) {
@@ -1814,13 +1887,7 @@ function formatPtoDate_(dateValue) {
     return 'Date not provided';
   }
 
-  let date;
-
-  if (dateValue instanceof Date) {
-    date = dateValue;
-  } else {
-    date = new Date(dateValue);
-  }
+  const date = parseFlexibleDate_(dateValue);
 
   if (isNaN(date.getTime())) {
     return String(dateValue);
@@ -1842,13 +1909,7 @@ function formatPtoShortDate_(dateValue) {
     return 'Date not provided';
   }
 
-  let date;
-
-  if (dateValue instanceof Date) {
-    date = dateValue;
-  } else {
-    date = new Date(dateValue);
-  }
+  const date = parseFlexibleDate_(dateValue);
 
   if (isNaN(date.getTime())) {
     return String(dateValue);
@@ -2389,6 +2450,54 @@ function normalizeDateString_(value) {
   }
 
   return String(value).trim();
+}
+
+function parseFlexibleDate_(dateValue) {
+  if (dateValue instanceof Date) {
+    return new Date(
+      dateValue.getFullYear(),
+      dateValue.getMonth(),
+      dateValue.getDate()
+    );
+  }
+
+  const text = String(dateValue || '').trim();
+
+  if (!text) {
+    return new Date('');
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (isoMatch) {
+    return new Date(
+      Number(isoMatch[1]),
+      Number(isoMatch[2]) - 1,
+      Number(isoMatch[3])
+    );
+  }
+
+  const mdyMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+
+  if (mdyMatch) {
+    return new Date(
+      Number(mdyMatch[3]),
+      Number(mdyMatch[1]) - 1,
+      Number(mdyMatch[2])
+    );
+  }
+
+  const parsed = new Date(text);
+
+  if (isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate()
+  );
 }
 
 function parseLocalDate_(value) {
